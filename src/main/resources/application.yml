@@ -20,6 +20,10 @@ server:
   port: 8080
   shutdown: graceful
 
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+
 shizhi:
   version: 0.0.1
 

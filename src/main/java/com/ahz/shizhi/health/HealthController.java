@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 
+import com.ahz.shizhi.common.api.ApiResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,18 +26,18 @@ public class HealthController {
     }
 
     @GetMapping
-    public HealthResponse check() {
+    public ApiResponse<HealthResponse> check() {
         String[] activeProfiles = environment.getActiveProfiles();
         List<String> profiles = activeProfiles.length == 0
                 ? List.of("default")
                 : Arrays.asList(activeProfiles);
 
-        return new HealthResponse(
+        return ApiResponse.ok(new HealthResponse(
                 "UP",
                 environment.getProperty("spring.application.name", "shizhi"),
                 version,
                 profiles,
                 OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-        );
+        ));
     }
 }
