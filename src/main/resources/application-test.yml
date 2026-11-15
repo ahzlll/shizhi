@@ -1,0 +1,5 @@
+# 自动化测试：只留警告，避免日志淹没测试输出
+logging:
+  level:
+    root: warn
+    com.ahz.shizhi: info

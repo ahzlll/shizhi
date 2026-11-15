@@ -1,0 +1,21 @@
+# 生产：2 核 2G 轻量服务器，Nginx 反代，systemd 托管
+server:
+  port: 8080
+  # 让应用能拿到 Nginx 转发的真实 IP 与协议
+  forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: 50
+
+logging:
+  level:
+    root: warn
+    com.ahz.shizhi: info
+  file:
+    name: logs/shizhi.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

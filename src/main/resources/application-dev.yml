@@ -1,0 +1,10 @@
+# 本地开发：日志放开，健康检查能看到细节
+logging:
+  level:
+    root: info
+    com.ahz.shizhi: debug
+
+management:
+  endpoint:
+    health:
+      show-details: always

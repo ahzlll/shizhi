@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: shizhi
+  # 默认开发环境，部署时用 --spring.profiles.active=prod 覆盖
+  profiles:
+    active: dev
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  shutdown: graceful
+
+shizhi:
+  version: 0.0.1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
