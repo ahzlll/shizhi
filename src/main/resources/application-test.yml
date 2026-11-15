@@ -1,4 +1,10 @@
-# 自动化测试：只留警告，避免日志淹没测试输出
+# 自动化测试：跑在独立的 shizhi_test 库上，避免污染开发数据
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/shizhi_test
+    username: postgres
+    password: ${SHIZHI_DB_PASSWORD:123456}
+
 logging:
   level:
     root: warn

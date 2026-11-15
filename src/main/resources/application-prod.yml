@@ -1,4 +1,10 @@
 # 生产：2 核 2G 轻量服务器，Nginx 反代，systemd 托管
+spring:
+  datasource:
+    url: ${SHIZHI_DB_URL}
+    username: ${SHIZHI_DB_USER}
+    password: ${SHIZHI_DB_PASSWORD}
+
 server:
   port: 8080
   # 让应用能拿到 Nginx 转发的真实 IP 与协议

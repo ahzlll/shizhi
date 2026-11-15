@@ -6,6 +6,15 @@ spring:
     active: dev
   jackson:
     default-property-inclusion: non_null
+  datasource:
+    hikari:
+      pool-name: shizhi-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 
 server:
   port: 8080
