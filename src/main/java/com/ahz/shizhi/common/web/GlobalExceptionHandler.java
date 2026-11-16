@@ -10,6 +10,7 @@ import com.ahz.shizhi.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -82,6 +83,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<ApiResponse<Void>> handleMediaType(HttpMediaTypeNotSupportedException ex) {
         return build(ErrorCode.UNSUPPORTED_MEDIA_TYPE, "不支持的 Content-Type：" + ex.getContentType());
+    }
+
+    /** 请求体不是合法 JSON，或者必填的 body 整个没带。这是客户端的问题，不能落到 500。 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return build(ErrorCode.PARAM_INVALID, "请求体缺失或不是合法的 JSON");
     }
 
     /** 缺少必填的查询参数。 */

@@ -9,6 +9,8 @@ import com.ahz.shizhi.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 
 class GlobalExceptionHandlerTest {
@@ -70,6 +72,22 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ApiResponse<Void>> response =
                 handler.handleBusiness(new BusinessException(ErrorCode.NOTE_NOT_FOUND));
 
+        assertThat(response.getBody().errors()).isNull();
+    }
+
+    /**
+     * 半截 JSON 曾经落到兜底的 500 —— 客户端发错东西不该让服务端"背锅"，
+     * 更不该让用户拿到一个看起来像服务挂了的错误码。
+     */
+    @Test
+    void unreadableBodyBecomesParamInvalid() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleUnreadableBody(
+                new HttpMessageNotReadableException("JSON parse error", new MockHttpInputMessage(new byte[0])));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().code()).isEqualTo(ErrorCode.PARAM_INVALID.code());
+        assertThat(response.getBody().message()).isEqualTo("请求体缺失或不是合法的 JSON");
+        // 解析失败挂不到具体字段上，所以不能带 errors
         assertThat(response.getBody().errors()).isNull();
     }
 }
