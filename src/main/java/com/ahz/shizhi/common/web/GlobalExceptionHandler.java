@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -89,6 +90,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException ex) {
         return build(ErrorCode.PARAM_INVALID, "请求体缺失或不是合法的 JSON");
+    }
+
+    /**
+     * 客户端在流式响应（SSE）中途断开。这不是服务端错误，而且此刻没有任何响应能写出去。
+     *
+     * <p>返回 void 是为了不再写响应体：落到兜底处理器的话，会因为 Content-Type 已经是
+     * {@code text/event-stream} 而再抛一次"找不到对应的消息转换器"，把一个正常的
+     * "用户关了页面"变成两条吓人的堆栈。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncRequestNotUsable(AsyncRequestNotUsableException ex) {
+        log.debug("客户端已断开，异步响应不再可用：{}", ex.getMessage());
     }
 
     /** 缺少必填的查询参数。 */

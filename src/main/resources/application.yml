@@ -30,6 +30,24 @@ shizhi:
     access-ttl: 30m
     refresh-ttl: 14d
     issuer: shizhi
+  # provider=stub 时用本地假模型，不需要任何 key；deepseek 走 OpenAI 兼容接口。
+  # api-key 为空不在启动时报错，调用时才报 5001 并打日志（否则本地和 CI 起不来）。
+  model:
+    provider: ${SHIZHI_MODEL_PROVIDER:stub}
+    base-url: ${SHIZHI_MODEL_BASE_URL:https://api.deepseek.com}
+    api-key: ${SHIZHI_MODEL_API_KEY:}
+    name: ${SHIZHI_MODEL_NAME:deepseek-chat}
+    first-token-timeout: 15s
+    idle-timeout: 60s
+    total-timeout: 180s
+  chat:
+    # 心跳 15s：Nginx 默认 proxy_read_timeout 60s，不心跳会被网关掐断
+    heartbeat-interval: 15s
+    # 双阈值 flush：距上次 ≥2s 且新增 ≥40 字才落库（05「消息生命周期与中断收敛」）
+    flush-interval: 2s
+    flush-min-chars: 40
+    # 异步请求超时，比模型总超时宽 60s
+    emitter-timeout: 240s
 
 management:
   endpoints:

@@ -451,6 +451,41 @@ class ChatFlowIntegrationTest {
     }
 
     /**
+     * 读时收敛的阈值必须落在 (200s, 220s] 这个区间里。
+     *
+     * <p>为什么需要这条「带宽断言」：其它僵尸用例造的都是 30 分钟前的行，1800s 远大于任何
+     * 合理阈值——阈值被改回 120s、甚至改成 60s，它们照样全绿。也就是说<b>常量被改错时，
+     * 没有任何测试会红</b>。这里用两个只差 20 秒的样本把阈值夹住：改回 120s 会让 200s 那条
+     * 被误杀（第一段断言红），调到 240s 会让 220s 那条不被收敛（第二段断言红）。
+     *
+     * <p><b>维护约定：阈值一旦调整，这条用例必须由人主动决定要不要跟着改。</b>
+     * 它的目的不是「永远绿」，而是把参数漂移从「静默」变成「要签字」——
+     * 以及提醒改的人：阈值必须 ≥ {@code shizhi.model.total-timeout} + 30s。
+     */
+    @Test
+    void reconcileThresholdSitsBetween200And220Seconds() throws Exception {
+        Account account = newUser("th");
+        long sessionId = createSession(account.token(), null);
+
+        long justUnder = insertStaleGenerating(sessionId, account.userId(), 200);
+        long justOver = insertStaleGenerating(sessionId, account.userId(), 220);
+
+        Resp resp = get("/api/sessions/" + sessionId + "/messages", account.token());
+        assertThat(resp.status()).isEqualTo(200);
+
+        // 200 秒：还在阈值之内，一行都不能动（阈值若被改小，这里立刻红）
+        assertThat(streamStateOf(justUnder)).isZero();
+        assertThat(interruptReasonOf(justUnder)).isNull();
+        assertThat(resp.body()).contains(
+                "\"id\":" + justUnder + ",\"role\":\"assistant\",\"content\":\"still streaming\",\"streamState\":0");
+
+        // 220 秒：必须已经收敛成「中断 / SHUTDOWN」（阈值若被改大，这里立刻红）
+        assertThat(streamStateOf(justOver)).isEqualTo(2);
+        assertThat(interruptReasonOf(justOver)).isEqualTo("SHUTDOWN");
+        assertThat(resp.body()).contains("\"streamState\":2").contains("SHUTDOWN");
+    }
+
+    /**
      * 04 §4.1：{@code errors} 只在字段级校验失败时出现。业务失败里带上它会骗前端去标红输入框，
      * 而这条请求根本没有输入框。
      *
@@ -586,6 +621,22 @@ class ChatFlowIntegrationTest {
 
     private String interruptReasonOf(Long messageId) {
         return jdbc.queryForObject("SELECT interrupt_reason FROM chat_message WHERE id = ?", String.class, messageId);
+    }
+
+    /**
+     * 插一条「多久以前更新过、仍停在生成中」的占位行，用来卡收敛阈值的边界。
+     *
+     * @param ageSeconds 距现在多少秒之前发生最后一次 flush（即 updated_at 的年龄）
+     */
+    private long insertStaleGenerating(long sessionId, long userId, int ageSeconds) {
+        Long id = jdbc.queryForObject("""
+                INSERT INTO chat_message (session_id, user_id, role, content, stream_state, created_at, updated_at)
+                VALUES (?, ?, 'assistant', 'still streaming', 0,
+                        now() - (? * interval '1 second'), now() - (? * interval '1 second'))
+                RETURNING id
+                """, Long.class, sessionId, userId, ageSeconds, ageSeconds);
+        assertThat(id).isNotNull();
+        return id;
     }
 
     private String skillCodeOf(long sessionId) {

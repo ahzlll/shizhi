@@ -4,6 +4,7 @@ import com.ahz.shizhi.auth.CurrentUser;
 import com.ahz.shizhi.auth.UserPrincipal;
 import com.ahz.shizhi.chat.dto.CreateSessionRequest;
 import com.ahz.shizhi.chat.dto.MessageView;
+import com.ahz.shizhi.chat.dto.SendMessageRequest;
 import com.ahz.shizhi.chat.dto.SessionView;
 import com.ahz.shizhi.common.api.ApiResponse;
 import com.ahz.shizhi.common.api.CursorPage;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * 会话与历史消息。
@@ -35,9 +37,11 @@ public class SessionController {
     private static final String DEFAULT_SIZE = "20";
 
     private final SessionService sessionService;
+    private final ChatStreamService chatStreamService;
 
-    public SessionController(SessionService sessionService) {
+    public SessionController(SessionService sessionService, ChatStreamService chatStreamService) {
         this.sessionService = sessionService;
+        this.chatStreamService = chatStreamService;
     }
 
     /**
@@ -59,6 +63,19 @@ public class SessionController {
             @Min(value = 1, message = "不能小于 1")
             @Max(value = 100, message = "不能大于 100") int size) {
         return ApiResponse.ok(sessionService.list(principal.userId(), page, size));
+    }
+
+    /**
+     * 发消息，SSE 流式返回。
+     *
+     * <p>校验失败与会话不存在都在这里同步抛出，此时还没开始推流，所以客户端拿到的是普通 JSON
+     * （1000 / 2004 / 1004）——一个已经建立的 SSE 连接是没法回 400 的。
+     */
+    @PostMapping("/{id}/messages")
+    public SseEmitter send(@CurrentUser UserPrincipal principal,
+                           @PathVariable long id,
+                           @Valid @RequestBody SendMessageRequest request) {
+        return chatStreamService.stream(principal.userId(), id, request.content());
     }
 
     /**
