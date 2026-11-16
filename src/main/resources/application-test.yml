@@ -5,6 +5,10 @@ spring:
     username: postgres
     password: ${SHIZHI_DB_PASSWORD:123456}
 
+shizhi:
+  jwt:
+    secret: test-only-secret-key-at-least-32-bytes-long-2026
+
 logging:
   level:
     root: warn

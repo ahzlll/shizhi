@@ -5,6 +5,11 @@ spring:
     username: ${SHIZHI_DB_USER}
     password: ${SHIZHI_DB_PASSWORD}
 
+shizhi:
+  jwt:
+    # 生产必须注入，没有默认值——缺了宁可启动失败，也不要跑一个用弱密钥签名的服务
+    secret: ${SHIZHI_JWT_SECRET}
+
 server:
   port: 8080
   # 让应用能拿到 Nginx 转发的真实 IP 与协议

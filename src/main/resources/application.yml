@@ -26,6 +26,10 @@ logging:
 
 shizhi:
   version: 0.0.1
+  jwt:
+    access-ttl: 30m
+    refresh-ttl: 14d
+    issuer: shizhi
 
 management:
   endpoints:
