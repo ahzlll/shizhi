@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -23,20 +24,27 @@ import org.springframework.test.context.ActiveProfiles;
  * （本轮没有写发消息的接口）。
  *
  * <p>每个用例都新建独立用户，靠用户隔离保证断言与库里已有数据无关——测试库不会每次清空。
+ *
+ * <p>端口随机：写死端口时两个 worker 并行跑会互抢，整类 0.001s 级全红。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
-        properties = "server.port=18091")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class ChatFlowIntegrationTest {
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
-    private static final String BASE = "http://127.0.0.1:18091";
+
+    @LocalServerPort
+    private int port;
+
+    private String base() {
+        return "http://127.0.0.1:" + port;
+    }
 
     /** 会话列表里每个会话对象都以 id 开头，title 紧跟其后。 */
     private static final Pattern SESSION_IDS = Pattern.compile("\"id\":(\\d+),\"title\":");
     /** 消息对象以 id 开头、role 紧跟其后，按响应里的出现顺序收集就是 list 的顺序。 */
     private static final Pattern MESSAGE_IDS = Pattern.compile("\\{\"id\":(\\d+),\"role\":\"");
-    /** 04 §4.1 要求时间带时区，只到秒的裸时间戳前端没法判断时区。 */
+    /** 时间要带时区：只到秒的裸时间戳，前端没法判断是哪个时区。 */
     private static final String ISO_TIME_BODY =
             "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})";
 
@@ -453,14 +461,12 @@ class ChatFlowIntegrationTest {
     /**
      * 读时收敛的阈值必须落在 (200s, 220s] 这个区间里。
      *
-     * <p>为什么需要这条「带宽断言」：其它僵尸用例造的都是 30 分钟前的行，1800s 远大于任何
-     * 合理阈值——阈值被改回 120s、甚至改成 60s，它们照样全绿。也就是说<b>常量被改错时，
-     * 没有任何测试会红</b>。这里用两个只差 20 秒的样本把阈值夹住：改回 120s 会让 200s 那条
-     * 被误杀（第一段断言红），调到 240s 会让 220s 那条不被收敛（第二段断言红）。
+     * <p>为什么要两个只差 20 秒的样本：其它僵尸用例造的都是 30 分钟前的行，1800s 远大于任何
+     * 合理阈值——阈值改回 120s、甚至改成 60s，它们照样全绿，常量被改错时没有任何测试会红。
+     * 这里把阈值夹在中间：改回 120s 会让 200s 那条被误杀，调到 240s 会让 220s 那条不被收敛。
      *
-     * <p><b>维护约定：阈值一旦调整，这条用例必须由人主动决定要不要跟着改。</b>
-     * 它的目的不是「永远绿」，而是把参数漂移从「静默」变成「要签字」——
-     * 以及提醒改的人：阈值必须 ≥ {@code shizhi.model.total-timeout} + 30s。
+     * <p>阈值改了这条就会红，这是故意的。真要调，先确认它还大于
+     * {@code shizhi.model.total-timeout}（留 30 秒余量），再改这里的两个边界值。
      */
     @Test
     void reconcileThresholdSitsBetween200And220Seconds() throws Exception {
@@ -486,7 +492,7 @@ class ChatFlowIntegrationTest {
     }
 
     /**
-     * 04 §4.1：{@code errors} 只在字段级校验失败时出现。业务失败里带上它会骗前端去标红输入框，
+     * {@code errors} 只在字段级校验失败时出现。业务失败里带上它，会骗前端去标红输入框，
      * 而这条请求根本没有输入框。
      *
      * <p>反面同样要守：成功响应里 {@code title}、{@code interruptReason}、{@code supersededBy}、
@@ -551,7 +557,7 @@ class ChatFlowIntegrationTest {
 
         long blankSessionId = sessionIds(blankSkill.body()).get(0);
         assertThat(skillCodeOf(blankSessionId)).isNull();
-        // title 建会话时必须为空，发第一条消息时才截取问题前 30 字（docs/03 §3.3）
+        // title 建会话时必须为空，发第一条消息时才截取问题的前 30 个字
         assertThat(titleOf(blankSessionId)).isNull();
         // last_active_at 建会话时就写 now()，否则会话建完在列表里排不到最前
         assertThat(hasLastActiveAt(blankSessionId)).isTrue();
@@ -654,7 +660,7 @@ class ChatFlowIntegrationTest {
     }
 
     private Resp post(String path, String json, String token) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(BASE + path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
                 .POST(json == null
                         ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(json));
@@ -669,7 +675,7 @@ class ChatFlowIntegrationTest {
     }
 
     private Resp get(String path, String token) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(BASE + path)).GET();
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path)).GET();
         if (token != null) {
             builder.header("Authorization", "Bearer " + token);
         }

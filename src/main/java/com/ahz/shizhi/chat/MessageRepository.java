@@ -15,10 +15,10 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 /**
- * 历史消息的读取。
+ * 消息的读写。
  *
- * <p>这里同时是 docs/03 §3.9 第 3 条「读时惰性收敛」的落点：用户拉历史时顺手把僵尸行改掉，
- * 保证没有人会看到一个永久转圈的泡泡。
+ * <p>拉历史时顺手把挂住的「生成中」改成「已中断」：进程崩了或者流挂死时，没有代码能去改状态，
+ * 只能等用户来拉历史这一下顺手修掉，否则那个气泡会一直转。
  */
 @Repository
 public class MessageRepository {
@@ -89,8 +89,8 @@ public class MessageRepository {
 
     /**
      * 插一行消息。用户消息直接是终态（{@code stream_state=1}），assistant 那一行是占位行
-     * （{@code stream_state=0}、{@code content=''}）——按 03 §3.9 第 1 条，占位行必须在流开始前写，
-     * 否则进程一崩，内存里的半截回答连个落点都没有。
+     * （{@code stream_state=0}、{@code content=''}）。占位行必须在流开始前写，
+     * 否则进程一崩，内存里的半截回答就没了。
      */
     public long insertMessage(long sessionId, long userId, String role, String content, int streamState) {
         Long id = jdbc.queryForObject(
@@ -106,8 +106,8 @@ public class MessageRepository {
     /**
      * 一轮问答对应两行消息，所以 +2；同时刷新 {@code last_active_at} 让会话浮到列表最前。
      *
-     * <p>{@code COALESCE(title, ?)} 是"首问定标题"的实现：03 §3.3 的口径是标题取第一个问题前 30 字，
-     * 建会话时还没有问题。用 COALESCE 而不是判断再写，省掉一次读，也不会被并发写覆盖。
+     * <p>{@code COALESCE(title, ?)} 是"首问定标题"的实现：标题取第一个问题的前 30 个字，
+     * 而建会话的时候还没有问题。用 COALESCE 而不是先判断再写，省掉一次读，也不会被并发写覆盖。
      */
     public void bumpSessionAfterTurn(long sessionId, String titleFromFirstQuestion) {
         jdbc.update("UPDATE chat_session SET message_count = message_count + 2,"
@@ -146,8 +146,8 @@ public class MessageRepository {
     /**
      * 中途停下（客户端断开 / 上游异常 / 超时）。
      *
-     * @param tail 补写的内容；客户端断开时传 null —— 04 §4.4 的口径是"已 flush 的保留，
-     *             未 flush 的丢失（上界是一个 flush 周期）"，所以此刻缓冲区里的东西不再落库
+     * @param tail 补写的内容；客户端断开时传 null：已经落库的保留，
+     *             没来得及写的就丢了，最多丢一个 flush 周期，所以此刻缓冲区里的东西不再落库
      */
     public int markInterrupted(long messageId, String tail, String reason) {
         if (tail == null) {
@@ -159,7 +159,7 @@ public class MessageRepository {
                 tail, reason, messageId);
     }
 
-    /** 一个字都没出来就失败。前端不渲染气泡，只提示错误（03 §3.9 的四态表）。 */
+    /** 一个字都没出来就失败。前端不渲染气泡，只提示错误。 */
     public int markFailed(long messageId, String reason) {
         return jdbc.update("UPDATE chat_message SET stream_state = 3, interrupt_reason = ?,"
                 + " updated_at = now() WHERE id = ?", reason, messageId);

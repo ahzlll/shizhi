@@ -12,20 +12,28 @@ import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
  * 真起一个 HTTP 服务跑完整链路：注册 → 登录 → 带令牌取用户 → 未带令牌被拦。
  *
- * <p>用固定端口 + JDK HttpClient，而不是 MockMvc，避免依赖可能变动的测试自动配置包。
+ * <p>用随机端口 + JDK HttpClient，而不是 MockMvc，避免依赖可能变动的测试自动配置包。
+ * 端口随机是为了让两个 worker 能并行跑测试——写死端口时两边会互抢，
+ * 表现是整类 0.001s 级全红（服务压根没起来）。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
-        properties = "server.port=18090")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class AuthFlowIntegrationTest {
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
-    private static final String BASE = "http://127.0.0.1:18090";
+
+    @LocalServerPort
+    private int port;
+
+    private String base() {
+        return "http://127.0.0.1:" + port;
+    }
 
     private record Resp(int status, String body) {
     }
@@ -113,7 +121,7 @@ class AuthFlowIntegrationTest {
     }
 
     private Resp post(String path, String json, String token) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(BASE + path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json));
         if (token != null) {
@@ -124,7 +132,7 @@ class AuthFlowIntegrationTest {
     }
 
     private Resp get(String path, String token) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(BASE + path)).GET();
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path)).GET();
         if (token != null) {
             builder.header("Authorization", "Bearer " + token);
         }

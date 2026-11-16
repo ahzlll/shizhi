@@ -28,7 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 流式对话（docs/05 链路 A 的一期子集：还没有检索与技能判定）。
+ * 流式对话。目前只做「提问 → 逐字回答 → 落库」这一段，检索旧笔记和技能判定还没接。
  *
  * <p>整条链路的骨架是"<b>两行消息先落库，再开流</b>"：
  *
@@ -62,7 +62,7 @@ public class ChatStreamService {
     private static final String REASON_MODEL_ERROR = "MODEL_ERROR";
     private static final String REASON_SERVER_TIMEOUT = "SERVER_TIMEOUT";
 
-    /** 03 §3.3：标题取首个问题的前 30 字。 */
+    /** 会话标题取第一个问题的前 30 个字。 */
     private static final int TITLE_MAX_LENGTH = 30;
 
     private final SessionService sessionService;
@@ -192,7 +192,7 @@ public class ChatStreamService {
         } catch (ClientClosedException ex) {
             log.info("客户端断开，收敛为中断 sessionId={} messageId={}", sessionId, ids.assistantMessageId());
             recordUsage(userId, 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false);
-            // 不补写缓冲区：04 §4.4 的口径是"已 flush 的保留，未 flush 的丢失"
+            // 断开时不补写缓冲区：已经落库的留下，没来得及写的就丢了，最多丢一个 flush 周期。
             messages.markInterrupted(ids.assistantMessageId(), null, REASON_CLIENT_CLOSED);
         } catch (ModelTimeoutException ex) {
             log.warn("模型超时 sessionId={} messageId={} reason={}",
@@ -220,9 +220,9 @@ public class ChatStreamService {
     }
 
     /**
-     * 失败收敛。分 2 和 3 的判断依据是<b>内存里累计吐过多少字</b>，不是去查 {@code content=''}——
-     * 03 §3.9 明确禁止用正文反推状态，而且缓冲区在每次 flush 后会清空，
-     * "缓冲区此刻是否为空"会把"刚 flush 完就出错"错判成"一个字都没出来"。
+     * 失败收敛。判 2 还是 3，看的是<b>这次已经吐出去多少字</b>，不是去查 {@code content}：
+     * 正文为空既可能是"还没写"，也可能是"模型返回了空回答"，反推不出状态。
+     * 也不能看"缓冲区此刻是否为空"——它每次 flush 后都会清空，刚 flush 完就出错会被误判成没吐过字。
      */
     private void convergeFailure(SseSink sink, long userId, TurnIds ids, StreamBuffer buffer,
                                  AtomicInteger emittedChars, long startedAt, AtomicLong firstTokenAt,
@@ -243,8 +243,7 @@ public class ChatStreamService {
     }
 
     /**
-     * 周期 flush。失败只记日志不中断生成（03 §3.9 第 2 条）——数据库抖一下
-     * 不该毁掉一次已经生成了一半的回答。
+     * 周期 flush。失败只记日志、不中断生成——数据库抖一下不该毁掉一次已经生成了一半的回答。
      */
     private void flush(long messageId, StreamBuffer buffer) {
         String pending = buffer.pendingText();

@@ -3,7 +3,7 @@ package com.ahz.shizhi.common.api;
 import org.springframework.http.HttpStatus;
 
 /**
- * 业务错误码。分段规则与含义见 docs/04-接口设计.md「错误码表」。
+ * 业务错误码。1xxx 参数与权限，2xxx 业务规则，5xxx 服务与外部依赖。
  *
  * <p>用 4 位而不是 3 位，是为了和 HTTP 状态码在日志里区分开。
  */

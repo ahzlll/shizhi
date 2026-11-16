@@ -31,8 +31,7 @@ public class SessionRepository {
      * 建会话时就把 {@code last_active_at} 写成 now()：会话列表按它倒序排列，
      * 新建的会话必须立刻出现在最上面，否则用户建完就找不到了。
      *
-     * <p>{@code title} 故意不写——按 docs/03 §3.3 的口径，标题取首个问题的前 30 字，
-     * 此刻还没有问题。
+     * <p>{@code title} 故意不写：标题取第一个问题的前 30 个字，此刻还没有问题。
      */
     private static final String INSERT_SESSION =
             "INSERT INTO chat_session (user_id, skill_code, last_active_at) VALUES (?, ?, now())"

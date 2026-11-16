@@ -46,7 +46,7 @@ public class SessionController {
 
     /**
      * 新建会话。body 可带可不带——前端进聊天页先建空会话是最常见的路径。
-     * {@code title} 此刻为空，发第一条消息时才截取问题前 30 字（docs/03 §3.3）。
+     * {@code title} 此刻为空，发第一条消息时才截取问题的前 30 个字。
      */
     @PostMapping
     public ApiResponse<SessionView> create(@CurrentUser UserPrincipal principal,

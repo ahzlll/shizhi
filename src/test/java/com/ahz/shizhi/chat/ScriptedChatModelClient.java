@@ -13,8 +13,8 @@ import com.ahz.shizhi.model.Turn;
  * 可编排的假模型：测试用 {@code play(...)} 指定这一轮吐什么、什么时候失败。
  *
  * <p>为什么需要它而不是直接用 {@link com.ahz.shizhi.model.StubChatClient}：
- * 假模型只会"正常说完"，而这张表里的四行——正常结束、中途出错、一个字没出就失败、
- * 超时——恰恰是这次最需要被证明的东西。
+ * 假模型只会"正常说完"，而正常结束、中途出错、一个字没出就失败、超时这四种结局，
+ * 才是真正要测的东西。
  */
 public class ScriptedChatModelClient implements ChatModelClient {
 

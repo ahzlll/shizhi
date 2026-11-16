@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param provider           {@code stub}（本地假模型）/ {@code deepseek}（OpenAI 兼容上游）
  * @param baseUrl            上游根地址，代码会拼 {@code /chat/completions}
- * @param apiKey             空表示没配，调用时才报错（见 06 验收：配错 key 要看到明确错误）
+ * @param apiKey             空表示没配，启动不拦，真正调用时给出明确错误
  * @param name               模型名，写进 ops_usage.model
  * @param firstTokenTimeout  首字超时：从发起请求到第一个 delta
  * @param idleTimeout        空闲超时：两个 chunk 之间最长间隔

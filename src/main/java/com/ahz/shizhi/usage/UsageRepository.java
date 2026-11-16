@@ -26,8 +26,8 @@ public class UsageRepository {
     }
 
     /**
-     * 记一次对话调用。{@code cost_micro} 固定 0——计价规则要等账户接口那一期，
-     * 现在填一个拍脑袋的单价只会让后面的统计多一批假数据。
+     * 记一次对话调用。{@code cost_micro} 固定 0：计价规则还没定，
+     * 先拍一个单价只会让后面的统计多一批假数据。
      */
     public void insertChatCall(ChatUsage usage) {
         jdbc.update(INSERT_USAGE,

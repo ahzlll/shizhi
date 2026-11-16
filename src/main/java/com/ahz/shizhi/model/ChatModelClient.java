@@ -40,7 +40,7 @@ public interface ChatModelClient {
     }
 
     /**
-     * token 用量的来源：1 供应商返回 / 2 本地估算（见 03 §3.3 ops_usage.usage_source）。
+     * token 用量的来源：1 供应商返回 / 2 本地估算。
      * 假模型永远只能估算，真模型的 usage 是上游给的。
      */
     default int usageSource() {

@@ -35,7 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
  * OpenAI 兼容接口的流式客户端（DeepSeek、vLLM、Ollama 的 /v1 都说得通）。
  *
  * <p>用 JDK 自带的 {@link HttpClient} 手写 SSE 解析，而不是引 WebClient / Spring AI：
- * 这一期要的只是"逐行读 data:"，依赖越少越不容易在版本升级时被拖住。
+ * 要的只是"逐行读 data:"，依赖越少越不容易在版本升级时被拖住。
  *
  * <p><b>三层超时都靠一个看门狗线程</b>：首字 15s、空闲 60s、总时长 180s。超时的动作是
  * <b>关掉响应流</b>，让阻塞在 {@code readLine()} 的读线程自己抛 IOException 出来——
@@ -67,8 +67,8 @@ public class OpenAiCompatibleChatClient implements ChatModelClient {
     public ModelResult stream(List<Turn> turns, Consumer<String> onDelta) {
         String apiKey = properties.apiKey();
         if (apiKey == null || apiKey.isBlank()) {
-            // 06 验收里"故意配错 key 要看到明确错误"落在这里：
-            // 启动不报错（否则本地和 CI 起不来），调用时报 5001 并把原因写进日志。
+            // 配错 key 不能死在启动上——本地和测试环境会直接起不来。
+            // 放到调用时失败，报 5001，把原因写进日志。
             log.error("模型未配置 api key，调用无法进行 provider={} baseUrl={}",
                     properties.provider(), properties.baseUrl());
             throw new ModelException(ErrorCode.MODEL_CALL_FAILED,

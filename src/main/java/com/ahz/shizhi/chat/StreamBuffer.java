@@ -6,7 +6,7 @@ import java.util.function.LongSupplier;
  * 双阈值落库缓冲：**距上次落库 ≥ 2 秒 且 新增 ≥ 40 字符**才写一次。
  *
  * <p>只看时间，开头几秒会连写一串空 UPDATE；只看字符数，模型卡住时永远不落盘。
- * 两者都要满足，丢失的上界才是一个 flush 周期（05「消息生命周期与中断收敛」）。
+ * 两者都要满足，断线时最多只丢一个 flush 周期的内容。
  *
  * <p>时钟用 {@link LongSupplier} 注入而不是直接 {@code System.currentTimeMillis()}：
  * 这样单测能把时间"拨快"，不必真的 sleep 两秒。

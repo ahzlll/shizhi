@@ -37,6 +37,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -49,10 +50,11 @@ import org.springframework.test.context.ActiveProfiles;
  * 能按剧本触发，否则最需要验证的那几条只能靠祈祷。
  *
  * <p>心跳与 flush 阈值都压到毫秒级：默认 15 秒心跳、2 秒 flush 会让这一组用例慢到没人愿意跑。
+ *
+ * <p>端口随机：写死端口时两个 worker 并行跑会互抢，整类 0.001s 级全红。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "server.port=18092",
                 "shizhi.model.provider=scripted",
                 "shizhi.chat.heartbeat-interval=50ms",
                 "shizhi.chat.flush-interval=10ms",
@@ -64,8 +66,14 @@ import org.springframework.test.context.ActiveProfiles;
 class ChatStreamIntegrationTest {
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
-    private static final String BASE = "http://127.0.0.1:18092";
     private static final long AWAIT_TIMEOUT_MILLIS = 5_000L;
+
+    @LocalServerPort
+    private int port;
+
+    private String base() {
+        return "http://127.0.0.1:" + port;
+    }
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -256,7 +264,7 @@ class ChatStreamIntegrationTest {
         }
 
         awaitState(assistantMessageId, 2, "CLIENT_CLOSED");
-        // 已 flush 的内容必须还在：丢失的上界只有一个 flush 周期
+        // 已 flush 的内容必须还在：断线最多丢一个 flush 周期的内容
         assertThat(messageContent(assistantMessageId)).isNotEmpty().matches("[0-9]+");
     }
 
@@ -360,7 +368,7 @@ class ChatStreamIntegrationTest {
     }
 
     private Resp postJson(String path, String json, String token) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(BASE + path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
                 .POST(json == null
                         ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(json));
@@ -377,7 +385,7 @@ class ChatStreamIntegrationTest {
 
     private HttpResponse<InputStream> postStream(long sessionId, String json, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest
-                .newBuilder(URI.create(BASE + "/api/sessions/" + sessionId + "/messages"))
+                .newBuilder(URI.create(base() + "/api/sessions/" + sessionId + "/messages"))
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
                 .POST(HttpRequest.BodyPublishers.ofString(json));
@@ -491,11 +499,6 @@ class ChatStreamIntegrationTest {
                 Integer.class, userId);
         return count == null ? 0 : count;
     }
-
-    // ==================================================================
-    // 以下是 QA 补充的边界与竞态用例（严过关）。改这块之前先打个招呼，
-    // 上面的 9 条由工程师维护。端口已占用 18092，这里不再单开上下文。
-    // ==================================================================
 
     @Autowired
     private MessageRepository messageRepository;

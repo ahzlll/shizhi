@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 历史消息对外的视图。
  *
  * <p>{@code streamState} 是判定消息状态的唯一依据，不能靠 {@code content} 为空反推——
- * 占位行和「模型返回了空回答」在正文上无法区分（docs/03 §3.9）。
+ * 占位行和「模型返回了空回答」在正文上分不出来。
  *
  * <p>{@code refNoteIds} / {@code refConceptIds} 必须在历史里带出来。检索结果是生成前就落库的，
  * 目的正是让断线刷新后还能渲染「参考了你的 N 条笔记」；不带这两个字段，那次落库就白做了。

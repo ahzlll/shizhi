@@ -87,7 +87,7 @@ public class SessionService {
     }
 
     /**
-     * 会话归属校验。两种失败必须分开报：查不到会话是 2004，别人的会话是 1004（04 §4.2）。
+     * 会话归属校验。两种失败分开报：查不到会话是 2004，别人的会话是 1004。
      * 包内可见——发消息也要用同一套判断，复制一份迟早会漂移。
      */
     void requireOwnership(long userId, long sessionId) {

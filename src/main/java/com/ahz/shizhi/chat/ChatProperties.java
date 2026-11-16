@@ -7,10 +7,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 流式对话的可调参数。
  *
- * <p>心跳间隔 15 秒对应 04 §4.5 的硬要求：Nginx 默认 {@code proxy_read_timeout 60s}，
- * 模型中途停顿超过 60 秒，连接会被网关掐断，用户看到的就是莫名其妙的"中断"。
+ * <p>心跳 15 秒一次：Nginx 默认 60 秒收不到数据就断开连接，模型中途停顿久了，
+ * 用户看到的就是莫名其妙的"中断"。
  *
- * <p>双阈值 flush 默认 2 秒 / 40 字（见 05「消息生命周期与中断收敛」）。做成配置项是为了让
+ * <p>双阈值 flush 默认 2 秒 / 40 字。做成配置项是为了让
  * 集成测试能把阈值压到毫秒级——否则验证"flush 过的内容还在"要等两秒以上，一组用例就慢十几秒。
  */
 @ConfigurationProperties(prefix = "shizhi.chat")

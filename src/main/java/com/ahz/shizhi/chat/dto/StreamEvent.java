@@ -6,7 +6,7 @@ package com.ahz.shizhi.chat.dto;
  * <p>用一个 sealed 接口把四种事件收在一处：事件名和数据体是一一对应的，
  * 分散成四个文件只会让"加一个事件"变成"改四个地方"。
  *
- * <p>字段名直接就是 JSON 字段名（record 组件名），前端按 04 §4.3 的表来解析。
+ * <p>字段名直接就是 JSON 字段名（record 组件名），改名字就等于改接口。
  */
 public sealed interface StreamEvent {
 
