@@ -9,6 +9,7 @@ import com.ahz.shizhi.common.api.ParamError;
 import com.ahz.shizhi.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -130,6 +131,11 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<ApiResponse<Void>> build(ErrorCode errorCode, String message, List<ParamError> errors) {
-        return ResponseEntity.status(errorCode.status()).body(ApiResponse.fail(errorCode, message, errors));
+        // 显式声明 JSON：流式接口（SSE）的客户端常带 Accept: text/event-stream，
+        // 不预设类型的话错误响应会因为协商不出可写的表示而变成 406，再被包成 500——
+        // 明明是一次参数或业务校验失败，客户端却拿到"服务端错误"。
+        return ResponseEntity.status(errorCode.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.fail(errorCode, message, errors));
     }
 }

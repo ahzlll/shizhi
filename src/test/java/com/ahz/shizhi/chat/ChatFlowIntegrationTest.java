@@ -492,6 +492,73 @@ class ChatFlowIntegrationTest {
     }
 
     /**
+     * 客户端带 {@code Accept: text/event-stream} 时，失败的响应仍然必须是普通 JSON。
+     *
+     * <p>真实前端的发消息请求就带这个头。如果全局异常处理器不显式声明 {@code application/json}，
+     * Spring 会按 Accept 去找能把 {@code ApiResponse} 写成 SSE 的转换器——找不到就抛第二次异常，
+     * 于是「访问别人的会话」这个本该 403 的场景变成 500，前端连 {@code code=1004} 都拿不到。
+     * 这条守的就是「内容协商不能把错误码带偏」。
+     */
+    @Test
+    void errorStaysJsonEvenWhenClientAcceptsEventStream() throws Exception {
+        Account owner = newUser("aes");
+        long sessionId = createSession(owner.token(), null);
+        Account stranger = newUser("aet");
+
+        HttpResponse<String> response = postAcceptingEventStream(
+                "/api/sessions/" + sessionId + "/messages",
+                """
+                        {"content":"偷看别人的会话"}
+                        """,
+                stranger.token());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.headers().firstValue("Content-Type").orElse(""))
+                .as("错误响应必须是 application/json，不能被 Accept 协商成 SSE（那不是 403，是 500）")
+                .contains("application/json")
+                .doesNotContain("text/event-stream");
+        assertThat(response.body()).contains("\"code\":1004");
+        // 开流之前的失败不该留下任何消息行
+        assertThat(rawMessageCount(sessionId)).isZero();
+    }
+
+    /**
+     * {@code stream_state=3}（一个字都没答出来）的行不进历史，但必须还在库里。
+     *
+     * <p>两段缺一不可：
+     * <ul>
+     *   <li><b>接口侧</b>：历史 list 里既要有正常回答、又不能有失败行。只断言「不含」的话，
+     *       「历史返回空列表」这种退化也能让它通过；</li>
+     *   <li><b>库里侧</b>：那一行仍在、状态仍是 3。证明这是<b>查询层过滤</b>而不是把失败痕迹删了——
+     *       否则将来谁把过滤改成「失败就删行」，接口表现一模一样，可重试历史和排查依据都没了，
+     *       而不会有任何测试发现。</li>
+     * </ul>
+     *
+     * <p>为什么要过滤：重试失败会一次留下一条空行，同一轮问答在历史里越堆越多，而状态 3 本来就不渲染气泡。
+     */
+    @Test
+    void failedEmptyAnswerIsHiddenFromHistoryButKeptInDatabase() throws Exception {
+        Account account = newUser("s3h");
+        long sessionId = createSession(account.token(), null);
+
+        long kept = insertMessage(sessionId, account.userId(), "assistant", "正常回答");
+        long failed = insertMessageWithState(sessionId, account.userId(), "assistant", "", 3);
+
+        Resp history = get("/api/sessions/" + sessionId + "/messages", account.token());
+
+        assertThat(history.status()).isEqualTo(200);
+        assertThat(messageIds(history.body()))
+                .as("正常回答必须在，失败空行必须不在")
+                .contains(kept)
+                .doesNotContain(failed);
+        assertThat(history.body()).doesNotContain("\"streamState\":3");
+
+        // 库里那一行还在，且状态没被改动——过滤发生在查询层
+        assertThat(streamStateOf(failed)).isEqualTo(3);
+        assertThat(rawMessageCount(sessionId)).isEqualTo(2);
+    }
+
+    /**
      * {@code errors} 只在字段级校验失败时出现。业务失败里带上它，会骗前端去标红输入框，
      * 而这条请求根本没有输入框。
      *
@@ -647,6 +714,41 @@ class ChatFlowIntegrationTest {
 
     private String skillCodeOf(long sessionId) {
         return jdbc.queryForObject("SELECT skill_code FROM chat_session WHERE id = ?", String.class, sessionId);
+    }
+
+    /** 插一条指定状态的行，绕过接口直接造样本（状态 3 只有失败路径才会产生，接口造不出来）。 */
+    private long insertMessageWithState(long sessionId, long userId, String role, String content, int streamState) {
+        Long id = jdbc.queryForObject("""
+                INSERT INTO chat_message (session_id, user_id, role, content, stream_state, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, now(), now())
+                RETURNING id
+                """, Long.class, sessionId, userId, role, content, streamState);
+        assertThat(id).isNotNull();
+        return id;
+    }
+
+    /** 某个会话在库里实际有多少行——用来证明「接口看不见」不等于「库里没有」。 */
+    private int rawMessageCount(long sessionId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT count(*) FROM chat_message WHERE session_id = ?", Integer.class, sessionId);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * 发一次带 {@code Accept: text/event-stream} 的请求，并把响应头也带回来。
+     *
+     * <p>单独一个方法而不是给 {@link Resp} 加字段：{@code Resp} 是全类共用的结构，
+     * 为一条用例改它会把 21 条既有用例一起牵动。
+     */
+    private HttpResponse<String> postAcceptingEventStream(String path, String json, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .POST(HttpRequest.BodyPublishers.ofString(json));
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private String titleOf(long sessionId) {

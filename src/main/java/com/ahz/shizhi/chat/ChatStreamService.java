@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.ahz.shizhi.chat.dto.StreamEvent;
 import com.ahz.shizhi.common.api.ErrorCode;
+import com.ahz.shizhi.common.exception.BusinessException;
 import com.ahz.shizhi.config.AsyncConfig;
 import com.ahz.shizhi.model.ChatModelClient;
 import com.ahz.shizhi.model.ModelException;
@@ -62,6 +63,9 @@ public class ChatStreamService {
     private static final String REASON_MODEL_ERROR = "MODEL_ERROR";
     private static final String REASON_SERVER_TIMEOUT = "SERVER_TIMEOUT";
 
+    /** 原回答算 1、重试一次算 2，最多留 3 代；再往后历史里会堆满几乎一样的回答。 */
+    private static final long MAX_RETRY_CHAIN_DEPTH = 3L;
+
     /** 会话标题取第一个问题的前 30 个字。 */
     private static final int TITLE_MAX_LENGTH = 30;
 
@@ -106,7 +110,30 @@ public class ChatStreamService {
 
         String question = content.strip();
         TurnIds ids = persistTurn(userId, sessionId, question);
+        return startStreaming(userId, sessionId, ids, null);
+    }
 
+    /**
+     * 重试一条被中断或失败的回答。
+     *
+     * <p>与发消息不同的是：不新增用户提问，而是插一条新的 assistant 行并把旧行标记为被替代。
+     * 新行是全新的一行而不是原地重写——复用同一个消息 id 会撞上「按 messageId 派发的异步任务」
+     * 那条唯一约束，第二次派发必然失败。
+     *
+     * @throws com.ahz.shizhi.common.exception.BusinessException 消息不存在（1001）/ 不是自己的（1004）/
+     *         状态不允许重试（2009）/ 重试链已达上限（2010）。都抛在返回 emitter 之前，所以是普通 JSON
+     */
+    public SseEmitter regenerate(long userId, long messageId) {
+        RetryPlan plan = prepareRetry(userId, messageId);
+        return startStreaming(userId, plan.sessionId(), plan.ids(), plan.retryOfMessageId());
+    }
+
+    /**
+     * 开流。发消息和重试共用的部分都收在这里，两条入口只负责把「这一轮的两个消息 id」准备好。
+     *
+     * @param retryOfMessageId 重试时指向被重试的旧行，首答为 null；失败且新行无产出时用它撤回替代关系
+     */
+    private SseEmitter startStreaming(long userId, long sessionId, TurnIds ids, Long retryOfMessageId) {
         SseEmitter emitter = new SseEmitter(chatProperties.emitterTimeout().toMillis());
         SseSink sink = new SseSink(emitter);
         emitter.onCompletion(sink::markClosed);
@@ -115,14 +142,62 @@ public class ChatStreamService {
 
         executor.execute(() -> {
             try {
-                generate(sink, userId, sessionId, ids);
+                generate(sink, userId, sessionId, ids, retryOfMessageId);
             } catch (RuntimeException ex) {
                 // 走到这里是线程池拒绝、或收敛本身失败（比如数据库挂了）。
-                // 消息行会停在 stream_state=0，由读时惰性收敛和定时扫描兜底成「中断」。
+                // 消息行会停在 stream_state=0，由启动扫描、定时扫描和读时惰性收敛兜底成「中断」。
                 log.error("流式生成线程异常退出 sessionId={} messageId={}", sessionId, ids.assistantMessageId(), ex);
             }
         });
         return emitter;
+    }
+
+    /**
+     * 校验 + 在一个事务里插新行、标记旧行、更新会话计数。
+     *
+     * <p>并发双击靠 {@code markSuperseded} 的条件更新挡：两次请求都通过了读校验时，
+     * 只有第一次能改到行，第二次影响行数为 0，于是整个事务回滚，不会留下两条新行。
+     */
+    private RetryPlan prepareRetry(long userId, long messageId) {
+        MessageRepository.RetrySource source = messages.findRetrySource(messageId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+        if (source.userId() != userId) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权访问该消息");
+        }
+        if (!ROLE_ASSISTANT.equals(source.role())) {
+            throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该消息不可重试");
+        }
+        if (source.streamState() != STREAM_INTERRUPTED && source.streamState() != STREAM_FAILED) {
+            throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED,
+                    source.streamState() == STREAM_GENERATING ? "该回答还在生成中，不可重试" : "该回答已完成，无需重试");
+        }
+        if (source.supersededBy() != null) {
+            throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该回答已被重试");
+        }
+        if (messages.chainDepth(messageId) >= MAX_RETRY_CHAIN_DEPTH) {
+            throw new BusinessException(ErrorCode.RETRY_LIMIT_EXCEEDED);
+        }
+
+        RetryPlan plan = transaction.execute(status -> {
+            long newMessageId = messages.insertRetryPlaceholder(source.sessionId(), userId,
+                    source.refNoteIds(), source.refConceptIds());
+            if (messages.markSuperseded(messageId, newMessageId) == 0) {
+                // 另一个请求抢先标记了旧行，这条新行没有存在意义，回滚掉
+                throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该回答已被重试");
+            }
+            messages.bumpSessionAfterRetry(source.sessionId());
+            long userMessageId = messages.previousUserMessageId(source.sessionId(), messageId);
+            if (userMessageId == 0) {
+                // 找不到对应的提问就说明数据不对：把 id=0 发给前端只会让那个气泡永远挂不上任何问题
+                throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "找不到这条回答对应的提问");
+            }
+            return new RetryPlan(source.sessionId(),
+                    new TurnIds(userMessageId, newMessageId), messageId);
+        });
+        if (plan == null) {
+            throw new IllegalStateException("重试落库后没有拿到消息 id");
+        }
+        return plan;
     }
 
     /**
@@ -144,7 +219,7 @@ public class ChatStreamService {
         return ids;
     }
 
-    private void generate(SseSink sink, long userId, long sessionId, TurnIds ids) {
+    private void generate(SseSink sink, long userId, long sessionId, TurnIds ids, Long retryOfMessageId) {
         long startedAt = System.currentTimeMillis();
         AtomicLong firstTokenAt = new AtomicLong(-1L);
         AtomicInteger emittedChars = new AtomicInteger();
@@ -194,25 +269,26 @@ public class ChatStreamService {
             recordUsage(userId, 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false);
             // 断开时不补写缓冲区：已经落库的留下，没来得及写的就丢了，最多丢一个 flush 周期。
             messages.markInterrupted(ids.assistantMessageId(), null, REASON_CLIENT_CLOSED);
+            restorePreviousIfEmpty(retryOfMessageId, ids.assistantMessageId(), emittedChars.get());
         } catch (ModelTimeoutException ex) {
             log.warn("模型超时 sessionId={} messageId={} reason={}",
                     sessionId, ids.assistantMessageId(), ex.getMessage());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    REASON_SERVER_TIMEOUT, ex.errorCode());
+                    retryOfMessageId, REASON_SERVER_TIMEOUT, ex.errorCode());
         } catch (ModelRateLimitException ex) {
             log.warn("模型限流 sessionId={} messageId={}", sessionId, ids.assistantMessageId());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    REASON_MODEL_ERROR, ex.errorCode());
+                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode());
         } catch (ModelException ex) {
             log.warn("模型调用失败 sessionId={} messageId={} reason={}",
                     sessionId, ids.assistantMessageId(), ex.getMessage());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    REASON_MODEL_ERROR, ex.errorCode());
+                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode());
         } catch (RuntimeException ex) {
             log.error("生成过程中出现未预期异常 sessionId={} messageId={}",
                     sessionId, ids.assistantMessageId(), ex);
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    REASON_MODEL_ERROR, ErrorCode.MODEL_CALL_FAILED);
+                    retryOfMessageId, REASON_MODEL_ERROR, ErrorCode.MODEL_CALL_FAILED);
         } finally {
             stopHeartbeat(heartbeat);
             sink.complete();
@@ -226,7 +302,7 @@ public class ChatStreamService {
      */
     private void convergeFailure(SseSink sink, long userId, TurnIds ids, StreamBuffer buffer,
                                  AtomicInteger emittedChars, long startedAt, AtomicLong firstTokenAt,
-                                 String reason, ErrorCode code) {
+                                 Long retryOfMessageId, String reason, ErrorCode code) {
         boolean emitted = emittedChars.get() > 0;
         recordUsage(userId, 0, 0, startedAt, firstTokenAt, reason, false);
         try {
@@ -239,7 +315,28 @@ public class ChatStreamService {
             // 收敛失败也不能让 error 事件推不出去：用户至少要知道这次没成功
             log.error("收敛消息状态失败 messageId={}", ids.assistantMessageId(), ex);
         }
+        restorePreviousIfEmpty(retryOfMessageId, ids.assistantMessageId(), emittedChars.get());
         sink.send(EVENT_ERROR, new StreamEvent.Error(ids.assistantMessageId(), code.code(), code.message()));
+    }
+
+    /**
+     * 重试出来的一行一个字都没产出时，把旧行的「已被替代」撤回。
+     *
+     * <p>否则用户点重试、模型挂了，连原来那条中断的半截回答也一起从历史里消失——
+     * 等于重试把历史弄丢了。只在新行无产出时撤回：有产出的新行本身就是更好的结果。
+     */
+    private void restorePreviousIfEmpty(Long retryOfMessageId, long newMessageId, int emittedChars) {
+        if (retryOfMessageId == null || emittedChars > 0) {
+            return;
+        }
+        try {
+            int restored = messages.clearSuperseded(retryOfMessageId, newMessageId);
+            if (restored > 0) {
+                log.info("重试无产出，已恢复原回答可见 messageId={}", retryOfMessageId);
+            }
+        } catch (DataAccessException ex) {
+            log.warn("恢复原回答可见失败 messageId={}", retryOfMessageId, ex);
+        }
     }
 
     /**
@@ -314,5 +411,11 @@ public class ChatStreamService {
 
     /** 一轮问答的两个消息 id。ack 事件要同时下发它们，前端才能把气泡和历史对上。 */
     private record TurnIds(long userMessageId, long assistantMessageId) {
+    }
+
+    /**
+     * 重试落库后的结果：会话、这一轮的两个 id、以及被重试的旧行 id（失败无产出时用来撤回替代）。
+     */
+    private record RetryPlan(long sessionId, TurnIds ids, long retryOfMessageId) {
     }
 }

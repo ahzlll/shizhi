@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import com.ahz.shizhi.chat.dto.MessageView;
 import com.ahz.shizhi.model.Turn;
@@ -42,9 +43,11 @@ public class MessageRepository {
      * 收敛阈值必须大于模型总超时（{@code shizhi.model.total-timeout}，当前 180s）。
      * 取小了会发生什么：一个正常生成、只是吐字慢的流在 120s 被读时收敛判成「已中断」，
      * 之后它跑完又写回 {@code stream_state=1}，用户看到的状态翻转一次、且没人解释得清。
-     * 05 里「模型超时 × 2」是量级意思（它举例时模型超时是 60s），核心是留够余量。
      */
-    private static final int STALE_AFTER_SECONDS = 210;
+    static final int STALE_AFTER_SECONDS = 210;
+
+    /** 消息状态 3：一个字都没生成出来。历史查询据此把这类行排除掉。 */
+    private static final int STREAM_FAILED = 3;
 
     private static final String RECONCILE_ZOMBIES =
             "UPDATE chat_message SET stream_state = 2, interrupt_reason = 'SHUTDOWN', updated_at = now()"
@@ -67,10 +70,35 @@ public class MessageRepository {
     }
 
     /**
+     * 启动时的全表收敛，<b>不加时间条件</b>：进程刚起来，本机不可能还有活着的流。
+     * 前提是单实例部署——多实例时会误杀另一台正在生成的回答。
+     */
+    public int reconcileAllGenerating() {
+        return jdbc.update("UPDATE chat_message SET stream_state = 2, interrupt_reason = 'SHUTDOWN',"
+                + " updated_at = now() WHERE stream_state = 0");
+    }
+
+    /**
+     * 定时兜底：进程活着但流挂死（上游 TCP 半开、读超时没配）时只有这一层能发现。
+     * 只碰超过阈值的行——阈值远大于一个 flush 周期，正在吐字的流不会被误杀。
+     */
+    public int reconcileStale() {
+        return jdbc.update("UPDATE chat_message SET stream_state = 2, interrupt_reason = 'SHUTDOWN',"
+                        + " updated_at = now() WHERE stream_state = 0"
+                        + " AND updated_at < now() - (? * interval '1 second')",
+                STALE_AFTER_SECONDS);
+    }
+
+    /**
      * 按 id 倒序取一页，调用方负责反转成时间正序。
      *
      * <p>倒序取是为了「取最近的 N 条」——游标分页永远从最新往回翻，正序取要先把整段读出来再截断。
      * {@code superseded_by IS NULL} 过滤掉被重试替代的行，否则历史里会出现两三条几乎一样的回答。
+     *
+     * <p>{@code stream_state <> 3} 过滤掉「失败且一个字都没产出」的行。它们记录的是「这次提问没答出来」，
+     * 但前端本来就不渲染空气泡；留在返回里只会随重试次数累积——每失败一次多一条，
+     * 历史会越长越脏。所以在查询层直接挡掉，而不是把判断推给调用方。
+     * 初始提问那条用户消息仍在，所以「我问过这句话」这个事实不会丢。
      *
      * @param cursor 取比它更早的消息，null 表示从最新的开始
      * @param limit  期望条数 + 1，多取的那条只用来判断还有没有下一页
@@ -80,11 +108,11 @@ public class MessageRepository {
         String sql = SELECT_COLUMNS
                 + " WHERE session_id = ?"
                 + (hasCursor ? " AND id < ?" : "")
-                + " AND superseded_by IS NULL ORDER BY id DESC LIMIT ?";
+                + " AND superseded_by IS NULL AND stream_state <> ? ORDER BY id DESC LIMIT ?";
         if (hasCursor) {
-            return jdbc.query(sql, ROW_MAPPER, sessionId, cursor, limit);
+            return jdbc.query(sql, ROW_MAPPER, sessionId, cursor, STREAM_FAILED, limit);
         }
-        return jdbc.query(sql, ROW_MAPPER, sessionId, limit);
+        return jdbc.query(sql, ROW_MAPPER, sessionId, STREAM_FAILED, limit);
     }
 
     /**
@@ -182,6 +210,120 @@ public class MessageRepository {
         List<Turn> ascending = new ArrayList<>(descending);
         Collections.reverse(ascending);
         return ascending;
+    }
+
+    /**
+     * 重试一条回答需要知道的旧行信息。一次查出来比查四次省三次往返，
+     * 也让「同一条消息被两个请求同时重试」这件事只有一个读点。
+     */
+    public record RetrySource(
+            long id,
+            long userId,
+            long sessionId,
+            String role,
+            int streamState,
+            Long supersededBy,
+            List<Long> refNoteIds,
+            List<Long> refConceptIds
+    ) {
+    }
+
+    public Optional<RetrySource> findRetrySource(long messageId) {
+        List<RetrySource> rows = jdbc.query(
+                "SELECT id, user_id, session_id, role, stream_state, superseded_by,"
+                        + " ref_note_ids, ref_concept_ids FROM chat_message WHERE id = ?",
+                (rs, rowNum) -> new RetrySource(
+                        rs.getLong("id"),
+                        rs.getLong("user_id"),
+                        rs.getLong("session_id"),
+                        rs.getString("role"),
+                        rs.getInt("stream_state"),
+                        rs.getObject("superseded_by", Long.class),
+                        readIdArray(rs, "ref_note_ids"),
+                        readIdArray(rs, "ref_concept_ids")),
+                messageId);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * 顺 {@code superseded_by} 往回数几代：原回答算 1、重试一次算 2。
+     * 用递归 CTE 一次算完，避免在 Java 里一层层查库。
+     */
+    public long chainDepth(long messageId) {
+        Long depth = jdbc.queryForObject(
+                "WITH RECURSIVE chain AS ("
+                        + " SELECT id FROM chat_message WHERE id = ?"
+                        + " UNION ALL"
+                        + " SELECT m.id FROM chat_message m JOIN chain c ON m.superseded_by = c.id"
+                        + ") SELECT count(*) FROM chain",
+                Long.class, messageId);
+        return depth == null ? 0L : depth;
+    }
+
+    /**
+     * 插重试出来的新行。{@code ref_note_ids} / {@code ref_concept_ids} 从旧行复制过来：
+     * 重试不重新检索，否则两次回答引用的笔记可能不一样，用户会以为系统在乱说。
+     */
+    public long insertRetryPlaceholder(long sessionId, long userId,
+                                       List<Long> refNoteIds, List<Long> refConceptIds) {
+        Long id = jdbc.queryForObject(
+                "INSERT INTO chat_message (session_id, user_id, role, content, stream_state, updated_at,"
+                        + " ref_note_ids, ref_concept_ids)"
+                        + " VALUES (?, ?, 'assistant', '', 0, now(), ?::bigint[], ?::bigint[]) RETURNING id",
+                Long.class, sessionId, userId, pgArray(refNoteIds), pgArray(refConceptIds));
+        if (id == null) {
+            throw new IllegalStateException("插入重试消息后没有返回主键");
+        }
+        return id;
+    }
+
+    /**
+     * 把旧行标记为已被新行替代。
+     *
+     * @return 影响行数。0 表示别的请求已经抢先标记过——调用方据此回滚，不会留下两条新行
+     */
+    public int markSuperseded(long messageId, long supersededBy) {
+        return jdbc.update("UPDATE chat_message SET superseded_by = ?, updated_at = now()"
+                + " WHERE id = ? AND superseded_by IS NULL", supersededBy, messageId);
+    }
+
+    /**
+     * 撤回「已被替代」。条件里带 {@code superseded_by = ?} 是为了只撤自己写的那条：
+     * 并发下这条链可能已经被别人接到更后面，无脑清空会把别人的重试关系弄坏。
+     */
+    public int clearSuperseded(long messageId, long expectedSupersededBy) {
+        return jdbc.update("UPDATE chat_message SET superseded_by = NULL WHERE id = ? AND superseded_by = ?",
+                messageId, expectedSupersededBy);
+    }
+
+    /** 重试只多一行 assistant，所以 +1；标题保持首次提问时的那条。 */
+    public void bumpSessionAfterRetry(long sessionId) {
+        jdbc.update("UPDATE chat_session SET message_count = message_count + 1, last_active_at = now()"
+                + " WHERE id = ?", sessionId);
+    }
+
+    /** 原回答之前最近的一条用户提问。前端靠它把重试出来的气泡和对应的提问对上。 */
+    public long previousUserMessageId(long sessionId, long beforeMessageId) {
+        Long id = jdbc.queryForObject(
+                "SELECT COALESCE(max(id), 0) FROM chat_message"
+                        + " WHERE session_id = ? AND role = 'user' AND id < ?",
+                Long.class, sessionId, beforeMessageId);
+        return id == null ? 0L : id;
+    }
+
+    /** pgjdbc 不认 {@code List<Long>}，拼成 {@code {1,2}} 再交给 SQL 里的 {@code ::bigint[]}。 */
+    private static String pgArray(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder("{");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                text.append(',');
+            }
+            text.append(ids.get(i));
+        }
+        return text.append('}').toString();
     }
 
     /** {@code bigint[]} 为空时 pgjdbc 给 null，这里统一成空列表，前端不用写空值判断。 */

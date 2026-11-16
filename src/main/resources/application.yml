@@ -48,6 +48,8 @@ shizhi:
     flush-min-chars: 40
     # 异步请求超时，比模型总超时宽 60s
     emitter-timeout: 240s
+    # 僵尸消息扫描间隔
+    reconcile-interval: 5m
 
 management:
   endpoints:
