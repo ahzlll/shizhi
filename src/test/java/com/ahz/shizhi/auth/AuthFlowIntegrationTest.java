@@ -89,8 +89,12 @@ class AuthFlowIntegrationTest {
         assertThat(refreshed.status()).isEqualTo(200);
 
         String newAccess = jsonString(refreshed.body(), "accessToken");
-        assertThat(newAccess).isNotBlank().isNotEqualTo(jsonString(login.body(), "accessToken"));
+        assertThat(newAccess).isNotBlank();
+        // 令牌的签发时间只精确到秒，登录和续期落进同一秒时，签出来的是逐字节相同的令牌。
+        // 所以这里验的不是「两个字符串必须不同」，而是续期真的换到了一个能用的令牌，
+        // 且 refresh 令牌原样返回（02 D-12：refresh 不滚动，否则并发请求会互相踢下线）。
         assertThat(get("/api/auth/me", newAccess).status()).isEqualTo(200);
+        assertThat(jsonString(refreshed.body(), "refreshToken")).isEqualTo(refreshToken);
     }
 
     @Test
