@@ -39,7 +39,7 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (HttpMethod.OPTIONS.matches(request.getMethod()) || PUBLIC_PATHS.contains(request.getRequestURI())) {
+        if (HttpMethod.OPTIONS.matches(request.getMethod()) || isPublic(request)) {
             return true;
         }
 
@@ -51,5 +51,14 @@ public class AuthInterceptor implements HandlerInterceptor {
         JwtPayload payload = jwtService.parseAccessToken(header.substring(BEARER_PREFIX.length()).trim());
         request.setAttribute(PRINCIPAL_ATTRIBUTE, new UserPrincipal(payload.userId(), payload.username()));
         return true;
+    }
+
+    private static boolean isPublic(HttpServletRequest request) {
+        if (PUBLIC_PATHS.contains(request.getRequestURI())) {
+            return true;
+        }
+        // 头像是 <img src> 直接加载的，带不上 Authorization；只放行读取，上传与删除仍要登录
+        return HttpMethod.GET.matches(request.getMethod())
+                && request.getRequestURI().startsWith("/api/account/avatar/");
     }
 }

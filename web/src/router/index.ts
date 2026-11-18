@@ -24,6 +24,30 @@ const router = createRouter({
       component: () => import('@/views/ChatView.vue'),
       meta: { requiresAuth: true, title: '对话' },
     },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
+      meta: { requiresAuth: true, title: '模型设置' },
+    },
+    {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('@/views/ProfilePage.vue'),
+      meta: { requiresAuth: true, title: '个人主页' },
+    },
+    {
+      path: '/appearance',
+      name: 'appearance',
+      component: () => import('@/views/AppearanceView.vue'),
+      meta: { requiresAuth: true, title: '外观' },
+    },
+    {
+      path: '/feedback',
+      name: 'feedback',
+      component: () => import('@/views/FeedbackView.vue'),
+      meta: { requiresAuth: true, title: '意见反馈' },
+    },
   ],
 })
 

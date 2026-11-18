@@ -1,38 +1,49 @@
-:root {
-  --el-color-primary: #52b788;
-  --el-color-primary-light-3: #7cc9a4;
-  --el-color-primary-light-5: #9ad7b8;
-  --el-color-primary-light-7: #bfe7d3;
-  --el-color-primary-light-8: #d3efe1;
-  --el-color-primary-light-9: #eaf8f1;
-  --el-color-primary-dark-2: #3f9d72;
+html:root {
+  /* 主色跟着外观走，深浅由 color-mix 派生，避免每套配色手写十几个色值 */
+  --el-color-primary: var(--sz-brand);
+  --el-color-primary-light-3: color-mix(in srgb, var(--sz-brand) 70%, #ffffff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--sz-brand) 50%, #ffffff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--sz-brand) 30%, #ffffff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--sz-brand) 20%, #ffffff);
+  --el-color-primary-light-9: color-mix(in srgb, var(--sz-brand) 10%, #ffffff);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--sz-brand) 80%, #000000);
 
-  --el-text-color-primary: #1f2d28;
-  --el-text-color-regular: #43554c;
-  --el-text-color-placeholder: #a3b5ac;
-  --el-border-color: #dcebe2;
-  --el-border-color-light: #e6f1ea;
-  --el-fill-color-blank: #ffffff;
+  --el-text-color-primary: var(--sz-ink);
+  --el-text-color-regular: var(--sz-ink);
+  --el-text-color-placeholder: color-mix(in srgb, var(--sz-ink-muted) 70%, transparent);
+  --el-border-color: var(--sz-line);
+  --el-border-color-light: var(--sz-line);
+  --el-fill-color-blank: var(--sz-surface);
+  --el-bg-color: var(--sz-surface);
+  --el-bg-color-overlay: var(--sz-surface);
   --el-border-radius-base: 10px;
+}
+
+html[data-theme="dark"]:root {
+  --el-color-primary-light-8: color-mix(in srgb, var(--sz-brand) 22%, var(--sz-surface));
+  --el-color-primary-light-9: color-mix(in srgb, var(--sz-brand) 12%, var(--sz-surface));
+  --el-fill-color-blank: var(--sz-surface);
+  --el-bg-color: var(--sz-surface);
+  --el-bg-color-overlay: var(--sz-surface);
 }
 
 .el-form-item__label {
   font-weight: 500;
-  color: #4a5b53;
+  color: var(--sz-ink-muted);
 }
 
 .el-input__wrapper {
   border-radius: 10px;
-  box-shadow: 0 0 0 1px #dcebe2 inset;
+  box-shadow: 0 0 0 1px var(--sz-line) inset;
   transition: box-shadow 0.2s ease;
 }
 
 .el-input__wrapper:hover {
-  box-shadow: 0 0 0 1px #b9dcc9 inset;
+  box-shadow: 0 0 0 1px var(--sz-brand) inset;
 }
 
 .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+  box-shadow: 0 0 0 1px var(--sz-brand) inset;
 }
 
 .el-button {
@@ -40,9 +51,8 @@
 }
 
 .el-button--primary {
-  --el-button-hover-bg-color: #5fc194;
-  --el-button-hover-border-color: #5fc194;
-  --el-button-active-bg-color: #3f9d72;
-  --el-button-active-border-color: #3f9d72;
-  box-shadow: 0 8px 18px rgba(82, 183, 136, 0.22);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--sz-brand) 85%, #ffffff);
+  --el-button-hover-border-color: color-mix(in srgb, var(--sz-brand) 85%, #ffffff);
+  --el-button-active-bg-color: var(--sz-brand-deep);
+  --el-button-active-border-color: var(--sz-brand-deep);
 }

@@ -1,6 +1,11 @@
 spring:
   application:
     name: shizhi
+  servlet:
+    multipart:
+      # 头像上限 2MB，请求体留一点余量给表单字段
+      max-file-size: 2MB
+      max-request-size: 3MB
   # 默认开发环境，部署时用 --spring.profiles.active=prod 覆盖
   profiles:
     active: dev
@@ -30,6 +35,9 @@ shizhi:
     access-ttl: 30m
     refresh-ttl: 14d
     issuer: shizhi
+  security:
+    # 加密用户自带 API key 的主密钥，base64 编码的 32 字节。留空则「自带模型」功能关闭
+    secret-key: ${SHIZHI_SECRET_KEY:}
   # provider=stub 时用本地假模型，不需要任何 key；deepseek 走 OpenAI 兼容接口。
   # api-key 为空不在启动时报错，调用时才报 5001 并打日志（否则本地和 CI 起不来）。
   model:
