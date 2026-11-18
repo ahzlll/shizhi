@@ -98,7 +98,7 @@ public class ScriptedChatModelClient implements ChatModelClient {
         if (current.failure() != null) {
             throw current.failure();
         }
-        return new ModelResult(10, 20, "stop");
+        return new ModelResult(10, 20, "stop", modelName());
     }
 
     @Override

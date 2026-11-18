@@ -41,6 +41,7 @@ class OpenAiCompatibleChatClientTest {
 
     private HttpServer server;
     private String lastRequestBody;
+    private final AtomicInteger requestCount = new AtomicInteger();
 
     @AfterEach
     void stopServer() {
@@ -48,6 +49,7 @@ class OpenAiCompatibleChatClientTest {
             server.stop(0);
             server = null;
         }
+        requestCount.set(0);
     }
 
     @AfterAll
@@ -173,8 +175,8 @@ class OpenAiCompatibleChatClientTest {
                 Thread.sleep(20L);
             }
         });
-        ModelProperties properties = new ModelProperties("deepseek", baseUrl, "test-key", "test-model",
-                Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofSeconds(20));
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "test-model",
+                null, Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofSeconds(20));
         OpenAiCompatibleChatClient client = new OpenAiCompatibleChatClient(properties, SCHEDULER);
 
         ClientClosedException abort = new ClientClosedException();
@@ -212,10 +214,97 @@ class OpenAiCompatibleChatClientTest {
         return flag.get();
     }
 
+    /**
+     * 上游限流时回的是 HTTP 200 + JSON 错误体，不是 429。按状态码判会把这种情况
+     * 一路送到「没有 [DONE]」，报成「模型流中断」——用户看到的提示就变成了「服务异常」。
+     */
+    @Test
+    void throttledJsonErrorBodyBecomesRateLimitException() {
+        OpenAiCompatibleChatClient client = clientWithJsonError(200,
+                "{\"error\":{\"code\":\"1305\",\"message\":\"该模型当前访问量过大，请稍后重试\"}}");
+
+        assertThatThrownBy(() -> client.stream(List.of(Turn.user("hi")), delta -> {
+        }))
+                .isInstanceOf(ModelRateLimitException.class)
+                .hasMessageContaining("访问量过大")
+                .extracting(ex -> ((ModelException) ex).errorCode())
+                .isEqualTo(ErrorCode.MODEL_RATE_LIMITED);
+    }
+
+    /**
+     * 思考型模型先吐十几秒的 reasoning 块，正文一个字都没有。首字超时必须按
+     * 「一个数据块都没收到」判，否则它会被自己的看门狗杀掉。
+     */
+    @Test
+    void reasoningChunksDoNotTripTheFirstTokenTimeout() {
+        String baseUrl = startServer(exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            OutputStream out = exchange.getResponseBody();
+            for (String reasoning : List.of("先想想", "再想想", "还想")) {
+                writeChunk(out, "{\"choices\":[{\"delta\":{\"reasoning_content\":\"" + reasoning + "\"}}]}");
+            }
+            // 正文比首字超时（200ms）晚到，但块一直在来，连接是活的
+            Thread.sleep(400L);
+            writeChunk(out, "{\"choices\":[{\"delta\":{\"content\":\"答\"}}]}");
+            writeChunk(out, "{\"choices\":[{\"delta\":{\"content\":\"案\"},\"finish_reason\":\"stop\"}],"
+                    + "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6}}");
+            out.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        });
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "glm-4.7-flash",
+                null, Duration.ofMillis(200), Duration.ofSeconds(5), Duration.ofSeconds(20));
+        OpenAiCompatibleChatClient client = new OpenAiCompatibleChatClient(properties, SCHEDULER);
+
+        List<String> deltas = new ArrayList<>();
+        ModelResult result = client.stream(List.of(Turn.user("hi")), deltas::add);
+
+        // 思考过程不透传：它不是答案的一部分，推给前端只会让用户看一堆没用的推理
+        assertThat(deltas).containsExactly("答", "案");
+        assertThat(result.finishReason()).isEqualTo("stop");
+        assertThat(result.completionTokens()).isEqualTo(6);
+    }
+
+    @Test
+    void fallsBackToSecondaryModelWhenPrimaryIsThrottled() {
+        String baseUrl = startServer(exchange -> {
+            if (lastRequestBody.contains("\"model\":\"glm-4.7-flash\"")) {
+                writeJsonError(exchange, 200,
+                        "{\"error\":{\"code\":\"1305\",\"message\":\"该模型当前访问量过大\"}}");
+                return;
+            }
+            writeEventStream(exchange, "备用模型的回答");
+        });
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "glm-4.7-flash",
+                "glm-4-flash", Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofSeconds(20));
+        OpenAiCompatibleChatClient client = new OpenAiCompatibleChatClient(properties, SCHEDULER);
+
+        List<String> deltas = new ArrayList<>();
+        ModelResult result = client.stream(List.of(Turn.user("hi")), deltas::add);
+
+        assertThat(deltas).containsExactly("备用模型的回答");
+        // 成本要记在真正跑过的那个模型上
+        assertThat(result.model()).isEqualTo("glm-4-flash");
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    void keepsOriginalRateLimitWhenNoFallbackIsConfigured() {
+        OpenAiCompatibleChatClient client = clientWithJsonError(200,
+                "{\"error\":{\"code\":\"1305\",\"message\":\"该模型当前访问量过大\"}}");
+
+        assertThatThrownBy(() -> client.stream(List.of(Turn.user("hi")), delta -> {
+        }))
+                .isInstanceOf(ModelRateLimitException.class);
+
+        // 没配降级就不该多打一次上游
+        assertThat(requestCount).hasValue(1);
+    }
+
     @Test
     void missingApiKeyFailsLoudlyInsteadOfReturningEmptyAnswer() {
-        ModelProperties properties = new ModelProperties("deepseek", "http://127.0.0.1:1", "  ",
-                "deepseek-chat", Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1));
+        ModelProperties properties = new ModelProperties("openai-compatible", "http://127.0.0.1:1", "  ",
+                "glm-4.7-flash", null, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1));
         OpenAiCompatibleChatClient client = new OpenAiCompatibleChatClient(properties, SCHEDULER);
 
         assertThatThrownBy(() -> client.stream(List.of(Turn.user("hi")), delta -> {
@@ -237,8 +326,8 @@ class OpenAiCompatibleChatClientTest {
                 out.flush();
             }
         });
-        ModelProperties properties = new ModelProperties("deepseek", baseUrl, "test-key", "test-model",
-                Duration.ofSeconds(5), idle, total);
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "test-model",
+                null, Duration.ofSeconds(5), idle, total);
         return new OpenAiCompatibleChatClient(properties, SCHEDULER);
     }
 
@@ -259,15 +348,50 @@ class OpenAiCompatibleChatClientTest {
                 Thread.currentThread().interrupt();
             }
         });
-        ModelProperties properties = new ModelProperties("deepseek", baseUrl, "test-key", "test-model",
-                Duration.ofSeconds(5), idle, Duration.ofSeconds(10));
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "test-model",
+                null, Duration.ofSeconds(5), idle, Duration.ofSeconds(10));
         return new OpenAiCompatibleChatClient(properties, SCHEDULER);
+    }
+
+    /** 上游用 HTTP 200 + JSON 错误体表达限流时用这个。 */
+    private OpenAiCompatibleChatClient clientWithJsonError(int status, String body) {
+        String baseUrl = startServer(exchange -> writeJsonError(exchange, status, body));
+        ModelProperties properties = new ModelProperties("openai-compatible", baseUrl, "test-key", "glm-4.7-flash",
+                null, Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofSeconds(20));
+        return new OpenAiCompatibleChatClient(properties, SCHEDULER);
+    }
+
+    private static void writeJsonError(HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(bytes);
+            out.flush();
+        }
+    }
+
+    private static void writeEventStream(HttpExchange exchange, String answer) throws IOException {
+        exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, 0);
+        OutputStream out = exchange.getResponseBody();
+        writeChunk(out, "{\"choices\":[{\"delta\":{\"content\":\"" + answer + "\"}}]}");
+        writeChunk(out, "{\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}],"
+                + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}");
+        out.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+        out.flush();
+    }
+
+    private static void writeChunk(OutputStream out, String json) throws IOException {
+        out.write(("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     private String startServer(ExchangeHandler handler) {
         try {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext(CHAT_PATH, exchange -> {
+                requestCount.incrementAndGet();
                 lastRequestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                 try {
                     handler.handle(exchange);

@@ -59,7 +59,7 @@ class StreamReconcilerTest {
 
     @Test
     void refusesToStartWhenTotalTimeoutLeavesNoMargin() {
-        ModelProperties tooSlow = new ModelProperties("stub", null, null, null,
+        ModelProperties tooSlow = new ModelProperties("stub", null, null, null, null,
                 null, null, Duration.ofSeconds(300));
 
         assertThatThrownBy(new ChatConfig(tooSlow)::verifyReconcileThreshold)
@@ -70,7 +70,7 @@ class StreamReconcilerTest {
 
     @Test
     void acceptsTheDefaultTimeoutRelation() {
-        ModelProperties defaults = new ModelProperties(null, null, null, null, null, null, null);
+        ModelProperties defaults = new ModelProperties(null, null, null, null, null, null, null, null);
 
         assertThatCode(new ChatConfig(defaults)::verifyReconcileThreshold).doesNotThrowAnyException();
     }

@@ -27,7 +27,7 @@ public class ModelConfig {
     }
 
     @Bean
-    @ConditionalOnProperty(name = "shizhi.model.provider", havingValue = "deepseek")
+    @ConditionalOnProperty(name = "shizhi.model.provider", havingValue = "openai-compatible")
     public ChatModelClient openAiCompatibleChatClient(ModelProperties properties,
                                                      @Qualifier("chatScheduler") ScheduledExecutorService scheduler) {
         return new OpenAiCompatibleChatClient(properties, scheduler);

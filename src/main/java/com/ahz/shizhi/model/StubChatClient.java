@@ -28,7 +28,7 @@ public class StubChatClient implements ChatModelClient {
         }
         int promptTokens = estimateTokens(promptChars(turns));
         int completionTokens = estimateTokens(SCRIPT.length());
-        return new ModelResult(promptTokens, completionTokens, "stop");
+        return new ModelResult(promptTokens, completionTokens, "stop", modelName());
     }
 
     @Override

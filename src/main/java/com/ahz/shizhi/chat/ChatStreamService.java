@@ -253,7 +253,7 @@ public class ChatStreamService {
 
             // 用量先记：stream_state=1 必须是所有写库动作里的最后一个，
             // 否则崩在中间就是"消息标记完成、成本没记上"，且没有任何信号
-            recordUsage(userId, result.promptTokens(), result.completionTokens(), startedAt,
+            recordUsage(userId, result.model(), result.promptTokens(), result.completionTokens(), startedAt,
                     firstTokenAt, result.finishReason(), true);
 
             // 提交点：末尾剩余内容 + stream_state=1 一次写完，且是最后一个写库动作
@@ -266,7 +266,7 @@ public class ChatStreamService {
                     System.currentTimeMillis() - startedAt, result.finishReason()));
         } catch (ClientClosedException ex) {
             log.info("客户端断开，收敛为中断 sessionId={} messageId={}", sessionId, ids.assistantMessageId());
-            recordUsage(userId, 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false);
+            recordUsage(userId, model.modelName(), 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false);
             // 断开时不补写缓冲区：已经落库的留下，没来得及写的就丢了，最多丢一个 flush 周期。
             messages.markInterrupted(ids.assistantMessageId(), null, REASON_CLIENT_CLOSED);
             restorePreviousIfEmpty(retryOfMessageId, ids.assistantMessageId(), emittedChars.get());
@@ -304,7 +304,7 @@ public class ChatStreamService {
                                  AtomicInteger emittedChars, long startedAt, AtomicLong firstTokenAt,
                                  Long retryOfMessageId, String reason, ErrorCode code) {
         boolean emitted = emittedChars.get() > 0;
-        recordUsage(userId, 0, 0, startedAt, firstTokenAt, reason, false);
+        recordUsage(userId, model.modelName(), 0, 0, startedAt, firstTokenAt, reason, false);
         try {
             if (emitted) {
                 messages.markInterrupted(ids.assistantMessageId(), buffer.pendingText(), reason);
@@ -375,15 +375,19 @@ public class ChatStreamService {
         }
     }
 
-    private void recordUsage(long userId, int promptTokens, int completionTokens, long startedAt,
-                             AtomicLong firstTokenAt, String finishReason, boolean success) {
+    /**
+     * @param modelName <b>实际</b>跑过的模型名。成功时取 {@code ModelResult} 里的值——
+     *                  主模型限流降级到备用模型后，成本要算在备用模型头上
+     */
+    private void recordUsage(long userId, String modelName, int promptTokens, int completionTokens,
+                             long startedAt, AtomicLong firstTokenAt, String finishReason, boolean success) {
         Integer firstTokenMs = firstTokenAt.get() < 0
                 ? null
                 : (int) (firstTokenAt.get() - startedAt);
         try {
             usage.insertChatCall(new UsageRepository.ChatUsage(
                     userId,
-                    model.modelName(),
+                    modelName,
                     promptTokens,
                     completionTokens,
                     (int) (System.currentTimeMillis() - startedAt),

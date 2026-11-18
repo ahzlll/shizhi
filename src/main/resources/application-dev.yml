@@ -10,6 +10,15 @@ shizhi:
   jwt:
     # 本地专用，生产必须用环境变量覆盖。长度不足 32 字节启动会直接失败
     secret: ${SHIZHI_JWT_SECRET:shizhi-local-dev-secret-key-do-not-use-in-prod}
+  model:
+    # 本地默认接真实模型；没有 key 时把 provider 改成 stub 即可跑通整条链路
+    provider: openai-compatible
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    api-key: ${SHIZHI_MODEL_API_KEY:}
+    # 主力用不思考的 4-flash：稳、首字快。4.7 质量更高，但高峰期经常被限流，
+    # 放在主位等于大部分请求要先等一次 429，所以只当备用。
+    name: glm-4-flash
+    fallback-name: glm-4.7-flash
 
 logging:
   level:
