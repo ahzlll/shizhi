@@ -1,0 +1,48 @@
+:root {
+  --el-color-primary: #52b788;
+  --el-color-primary-light-3: #7cc9a4;
+  --el-color-primary-light-5: #9ad7b8;
+  --el-color-primary-light-7: #bfe7d3;
+  --el-color-primary-light-8: #d3efe1;
+  --el-color-primary-light-9: #eaf8f1;
+  --el-color-primary-dark-2: #3f9d72;
+
+  --el-text-color-primary: #1f2d28;
+  --el-text-color-regular: #43554c;
+  --el-text-color-placeholder: #a3b5ac;
+  --el-border-color: #dcebe2;
+  --el-border-color-light: #e6f1ea;
+  --el-fill-color-blank: #ffffff;
+  --el-border-radius-base: 10px;
+}
+
+.el-form-item__label {
+  font-weight: 500;
+  color: #4a5b53;
+}
+
+.el-input__wrapper {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px #dcebe2 inset;
+  transition: box-shadow 0.2s ease;
+}
+
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px #b9dcc9 inset;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.el-button {
+  border-radius: 10px;
+}
+
+.el-button--primary {
+  --el-button-hover-bg-color: #5fc194;
+  --el-button-hover-border-color: #5fc194;
+  --el-button-active-bg-color: #3f9d72;
+  --el-button-active-border-color: #3f9d72;
+  box-shadow: 0 8px 18px rgba(82, 183, 136, 0.22);
+}
