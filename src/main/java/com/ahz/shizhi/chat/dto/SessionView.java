@@ -14,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param skillCode      本次会话绑定的技能标识，null 表示由系统路由
  * @param messageCount   冗余计数，含占位行与被替代的行，仅用于粗略展示
  * @param lastActiveAt   会话列表的排序依据
+ * @param pinned         置顶的会话排在最前
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record SessionView(
@@ -22,6 +23,7 @@ public record SessionView(
         String skillCode,
         int messageCount,
         OffsetDateTime lastActiveAt,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        boolean pinned
 ) {
 }

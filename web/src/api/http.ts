@@ -82,4 +82,13 @@ export const http = {
   post<T>(url: string, data?: unknown): Promise<T> {
     return raw.post(url, data) as unknown as Promise<T>
   },
+  patch<T>(url: string, data?: unknown): Promise<T> {
+    return raw.patch(url, data) as unknown as Promise<T>
+  },
+  put<T>(url: string, data?: unknown): Promise<T> {
+    return raw.put(url, data) as unknown as Promise<T>
+  },
+  delete<T>(url: string): Promise<T> {
+    return raw.delete(url) as unknown as Promise<T>
+  },
 }

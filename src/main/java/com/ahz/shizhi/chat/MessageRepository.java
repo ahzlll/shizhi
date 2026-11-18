@@ -115,6 +115,18 @@ public class MessageRepository {
         return jdbc.query(sql, ROW_MAPPER, sessionId, STREAM_FAILED, limit);
     }
 
+    public int deleteBySession(long sessionId) {
+        return jdbc.update("DELETE FROM chat_message WHERE session_id = ?", sessionId);
+    }
+
+    /** 判断是不是第一轮：标题只在第一轮结束时生成一次。 */
+    public int countUserMessages(long sessionId) {
+        Integer total = jdbc.queryForObject(
+                "SELECT count(*) FROM chat_message WHERE session_id = ? AND role = 'user'",
+                Integer.class, sessionId);
+        return total == null ? 0 : total;
+    }
+
     /**
      * 插一行消息。用户消息直接是终态（{@code stream_state=1}），assistant 那一行是占位行
      * （{@code stream_state=0}、{@code content=''}）。占位行必须在流开始前写，

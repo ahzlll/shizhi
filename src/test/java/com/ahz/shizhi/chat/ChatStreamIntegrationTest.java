@@ -59,7 +59,9 @@ import org.springframework.test.context.ActiveProfiles;
                 "shizhi.chat.heartbeat-interval=50ms",
                 "shizhi.chat.flush-interval=10ms",
                 "shizhi.chat.flush-min-chars=5",
-                "shizhi.chat.emitter-timeout=30s"
+                "shizhi.chat.emitter-timeout=30s",
+                // 脚本化模型按顺序出牌，标题生成多一次调用会把后续用例的脚本顶掉
+                "shizhi.chat.generate-title=false"
         })
 @ActiveProfiles("test")
 @Import(ChatStreamIntegrationTest.ScriptedModelConfig.class)

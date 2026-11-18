@@ -127,6 +127,23 @@ class MessageRegenerateIntegrationTest {
     }
 
     @Test
+    void regeneratesCompletedAnswer() throws Exception {
+        Account owner = newUser("rc");
+        long sessionId = createSession(owner.token());
+
+        model.play(ScriptedChatModelClient.Script.deltas("第一版回答"));
+        List<SseEvent> first = withoutHeartbeats(sendMessage(sessionId, "问个问题", owner.token()));
+        long assistantId = longField(data(first, "ack"), "assistantMessageId");
+
+        model.play(ScriptedChatModelClient.Script.deltas("第二版回答"));
+        List<SseEvent> second = withoutHeartbeats(regenerateStream(assistantId, owner.token()));
+
+        assertThat(names(second)).containsExactly("ack", "delta", "done");
+        assertThat(supersededBy(assistantId))
+                .isEqualTo(longField(data(second, "ack"), "assistantMessageId"));
+    }
+
+    @Test
     void rejectsMessagesThatCannotBeRetried() throws Exception {
         Account owner = newUser("rj");
         long sessionId = createSession(owner.token());
@@ -136,8 +153,6 @@ class MessageRegenerateIntegrationTest {
         long completedId = longField(data(completed, "ack"), "assistantMessageId");
         long userMessageId = longField(data(completed, "ack"), "userMessageId");
 
-        // 已经完成的回答
-        assertRetryRejected(completedId, owner.token(), 409, ErrorCode.MESSAGE_ALREADY_COMPLETED.code());
         // 用户自己发的消息
         assertRetryRejected(userMessageId, owner.token(), 409, ErrorCode.MESSAGE_ALREADY_COMPLETED.code());
         // 还在生成中的占位行

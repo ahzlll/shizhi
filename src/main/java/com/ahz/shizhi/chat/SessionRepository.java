@@ -22,10 +22,12 @@ public class SessionRepository {
             rs.getString("skill_code"),
             rs.getInt("message_count"),
             rs.getObject("last_active_at", OffsetDateTime.class),
-            rs.getObject("created_at", OffsetDateTime.class));
+            rs.getObject("created_at", OffsetDateTime.class),
+            rs.getBoolean("pinned"));
 
     private static final String SELECT_COLUMNS =
-            "SELECT id, title, skill_code, message_count, last_active_at, created_at FROM chat_session";
+            "SELECT id, title, skill_code, message_count, last_active_at, created_at, pinned"
+                    + " FROM chat_session";
 
     /**
      * 建会话时就把 {@code last_active_at} 写成 now()：会话列表按它倒序排列，
@@ -35,7 +37,7 @@ public class SessionRepository {
      */
     private static final String INSERT_SESSION =
             "INSERT INTO chat_session (user_id, skill_code, last_active_at) VALUES (?, ?, now())"
-                    + " RETURNING id, title, skill_code, message_count, last_active_at, created_at";
+                    + " RETURNING id, title, skill_code, message_count, last_active_at, created_at, pinned";
 
     private final JdbcTemplate jdbc;
 
@@ -60,8 +62,28 @@ public class SessionRepository {
     /** 排序固定为 {@code last_active_at DESC, id DESC}：同一毫秒建的两个会话靠 id 保证顺序稳定。 */
     public List<SessionView> pageByUser(long userId, int limit, long offset) {
         return jdbc.query(
-                SELECT_COLUMNS + " WHERE user_id = ? ORDER BY last_active_at DESC, id DESC LIMIT ? OFFSET ?",
+                SELECT_COLUMNS + " WHERE user_id = ? ORDER BY pinned DESC, last_active_at DESC, id DESC LIMIT ? OFFSET ?",
                 ROW_MAPPER, userId, limit, offset);
+    }
+
+    /** 改名。返回受影响行数，调用方据此区分「没这条会话」和「不是你的」。 */
+    public int updateTitle(long sessionId, long userId, String title) {
+        return jdbc.update("UPDATE chat_session SET title = ? WHERE id = ? AND user_id = ?",
+                title, sessionId, userId);
+    }
+
+    public List<SessionView> findById(long sessionId) {
+        return jdbc.query(SELECT_COLUMNS + " WHERE id = ?", ROW_MAPPER, sessionId);
+    }
+
+    public int deleteById(long sessionId, long userId) {
+        return jdbc.update("DELETE FROM chat_session WHERE id = ? AND user_id = ?", sessionId, userId);
+    }
+
+    /** 置顶只改标记，不动 last_active_at——置顶不该把会话的活跃时间刷新成现在。 */
+    public int updatePinned(long sessionId, long userId, boolean pinned) {
+        return jdbc.update("UPDATE chat_session SET pinned = ? WHERE id = ? AND user_id = ?",
+                pinned, sessionId, userId);
     }
 
     /**

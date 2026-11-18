@@ -651,6 +651,46 @@ class ChatFlowIntegrationTest {
         assertThat(sessionIds(resp.body())).containsExactly(newer, older);
     }
 
+    @Test
+    void renamesAndDeletesSession() throws Exception {
+        Account owner = newUser("rn");
+        long sessionId = createSession(owner.token(), "{}");
+        insertMessage(sessionId, owner.userId(), "user", "一个问题");
+
+        Resp renamed = patch("/api/sessions/" + sessionId, "{\"title\":\"换个名字\"}", owner.token());
+        assertThat(renamed.status()).isEqualTo(200);
+        assertThat(titleOf(sessionId)).isEqualTo("换个名字");
+
+        // 改名只动标题，消息不能被顺手清掉
+        assertThat(rawMessageCount(sessionId)).isEqualTo(1);
+
+        Account stranger = newUser("rs");
+        assertThat(patch("/api/sessions/" + sessionId, "{\"title\":\"抢改\"}", stranger.token()).status())
+                .isEqualTo(403);
+        assertThat(delete("/api/sessions/" + sessionId, stranger.token()).status()).isEqualTo(403);
+
+        Resp deleted = delete("/api/sessions/" + sessionId, owner.token());
+        assertThat(deleted.status()).isEqualTo(200);
+        assertThat(rawMessageCount(sessionId)).isZero();
+        Integer sessionRows = jdbc.queryForObject(
+                "SELECT count(*) FROM chat_session WHERE id = ?", Integer.class, sessionId);
+        assertThat(sessionRows).isZero();
+    }
+
+    @Test
+    void pinnedSessionMovesToTop() throws Exception {
+        Account owner = newUser("pn");
+        long older = createSession(owner.token(), "{}");
+        Thread.sleep(5);
+        createSession(owner.token(), "{}");
+
+        assertThat(patch("/api/sessions/" + older + "/pin", "{\"pinned\":true}", owner.token()).status())
+                .isEqualTo(200);
+
+        Resp list = get("/api/sessions?page=1&size=10", owner.token());
+        assertThat(sessionIds(list.body())).startsWith(older);
+    }
+
     private Account newUser(String prefix) throws Exception {
         String username = prefix + UUID.randomUUID().toString().substring(0, 8);
         Resp registered = post("/api/auth/register", """
@@ -769,6 +809,26 @@ class ChatFlowIntegrationTest {
         if (json != null) {
             builder.header("Content-Type", "application/json");
         }
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        HttpResponse<String> response = CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return new Resp(response.statusCode(), response.body());
+    }
+
+    private Resp patch(String path, String json, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
+                .method("PATCH", HttpRequest.BodyPublishers.ofString(json))
+                .header("Content-Type", "application/json");
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        HttpResponse<String> response = CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return new Resp(response.statusCode(), response.body());
+    }
+
+    private Resp delete(String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path)).DELETE();
         if (token != null) {
             builder.header("Authorization", "Bearer " + token);
         }

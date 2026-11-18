@@ -19,6 +19,7 @@ import com.ahz.shizhi.model.ModelRateLimitException;
 import com.ahz.shizhi.model.ModelResult;
 import com.ahz.shizhi.model.ModelTimeoutException;
 import com.ahz.shizhi.model.Turn;
+import com.ahz.shizhi.model.UserModelClientFactory;
 import com.ahz.shizhi.usage.UsageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +74,8 @@ public class ChatStreamService {
     private final MessageRepository messages;
     private final UsageRepository usage;
     private final PromptBuilder promptBuilder;
-    private final ChatModelClient model;
+    private final UserModelClientFactory modelClients;
+    private final SessionTitleService titleService;
     private final ChatProperties chatProperties;
     private final TransactionTemplate transaction;
     private final Executor executor;
@@ -83,7 +85,8 @@ public class ChatStreamService {
                              MessageRepository messages,
                              UsageRepository usage,
                              PromptBuilder promptBuilder,
-                             ChatModelClient model,
+                             UserModelClientFactory modelClients,
+                             SessionTitleService titleService,
                              ChatProperties chatProperties,
                              TransactionTemplate transaction,
                              @Qualifier(AsyncConfig.CHAT_STREAM_EXECUTOR) Executor executor,
@@ -92,7 +95,8 @@ public class ChatStreamService {
         this.messages = messages;
         this.usage = usage;
         this.promptBuilder = promptBuilder;
-        this.model = model;
+        this.modelClients = modelClients;
+        this.titleService = titleService;
         this.chatProperties = chatProperties;
         this.transaction = transaction;
         this.executor = executor;
@@ -110,7 +114,7 @@ public class ChatStreamService {
 
         String question = content.strip();
         TurnIds ids = persistTurn(userId, sessionId, question);
-        return startStreaming(userId, sessionId, ids, null);
+        return startStreaming(userId, sessionId, ids, null, question);
     }
 
     /**
@@ -125,7 +129,7 @@ public class ChatStreamService {
      */
     public SseEmitter regenerate(long userId, long messageId) {
         RetryPlan plan = prepareRetry(userId, messageId);
-        return startStreaming(userId, plan.sessionId(), plan.ids(), plan.retryOfMessageId());
+        return startStreaming(userId, plan.sessionId(), plan.ids(), plan.retryOfMessageId(), null);
     }
 
     /**
@@ -133,7 +137,8 @@ public class ChatStreamService {
      *
      * @param retryOfMessageId 重试时指向被重试的旧行，首答为 null；失败且新行无产出时用它撤回替代关系
      */
-    private SseEmitter startStreaming(long userId, long sessionId, TurnIds ids, Long retryOfMessageId) {
+    private SseEmitter startStreaming(long userId, long sessionId, TurnIds ids, Long retryOfMessageId,
+                                      String question) {
         SseEmitter emitter = new SseEmitter(chatProperties.emitterTimeout().toMillis());
         SseSink sink = new SseSink(emitter);
         emitter.onCompletion(sink::markClosed);
@@ -142,7 +147,7 @@ public class ChatStreamService {
 
         executor.execute(() -> {
             try {
-                generate(sink, userId, sessionId, ids, retryOfMessageId);
+                generate(sink, userId, sessionId, ids, retryOfMessageId, question);
             } catch (RuntimeException ex) {
                 // 走到这里是线程池拒绝、或收敛本身失败（比如数据库挂了）。
                 // 消息行会停在 stream_state=0，由启动扫描、定时扫描和读时惰性收敛兜底成「中断」。
@@ -167,9 +172,8 @@ public class ChatStreamService {
         if (!ROLE_ASSISTANT.equals(source.role())) {
             throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该消息不可重试");
         }
-        if (source.streamState() != STREAM_INTERRUPTED && source.streamState() != STREAM_FAILED) {
-            throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED,
-                    source.streamState() == STREAM_GENERATING ? "该回答还在生成中，不可重试" : "该回答已完成，无需重试");
+        if (source.streamState() == STREAM_GENERATING) {
+            throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该回答还在生成中，不可重试");
         }
         if (source.supersededBy() != null) {
             throw new BusinessException(ErrorCode.MESSAGE_ALREADY_COMPLETED, "该回答已被重试");
@@ -219,8 +223,11 @@ public class ChatStreamService {
         return ids;
     }
 
-    private void generate(SseSink sink, long userId, long sessionId, TurnIds ids, Long retryOfMessageId) {
+    private void generate(SseSink sink, long userId, long sessionId, TurnIds ids, Long retryOfMessageId,
+                          String question) {
         long startedAt = System.currentTimeMillis();
+        // 用户自带 key 时走他的模型，没配则用服务端默认
+        ChatModelClient model = modelClients.resolve(userId);
         AtomicLong firstTokenAt = new AtomicLong(-1L);
         AtomicInteger emittedChars = new AtomicInteger();
         StreamBuffer buffer = new StreamBuffer(
@@ -254,7 +261,7 @@ public class ChatStreamService {
             // 用量先记：stream_state=1 必须是所有写库动作里的最后一个，
             // 否则崩在中间就是"消息标记完成、成本没记上"，且没有任何信号
             recordUsage(userId, result.model(), result.promptTokens(), result.completionTokens(), startedAt,
-                    firstTokenAt, result.finishReason(), true);
+                    firstTokenAt, result.finishReason(), true, model.usageSource());
 
             // 提交点：末尾剩余内容 + stream_state=1 一次写完，且是最后一个写库动作
             messages.markCompleted(ids.assistantMessageId(), buffer.pendingText(),
@@ -264,9 +271,16 @@ public class ChatStreamService {
             sink.send(EVENT_DONE, new StreamEvent.Done(ids.assistantMessageId(),
                     result.promptTokens(), result.completionTokens(),
                     System.currentTimeMillis() - startedAt, result.finishReason()));
+
+            // done 已经发出去，这里再花一两秒让模型起个标题，不占用用户的等待时间
+            if (chatProperties.generateTitle() && question != null
+                    && messages.countUserMessages(sessionId) == 1) {
+                titleService.generate(userId, sessionId, question);
+            }
         } catch (ClientClosedException ex) {
             log.info("客户端断开，收敛为中断 sessionId={} messageId={}", sessionId, ids.assistantMessageId());
-            recordUsage(userId, model.modelName(), 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false);
+            recordUsage(userId, model.modelName(), 0, 0, startedAt, firstTokenAt, REASON_CLIENT_CLOSED, false,
+                    model.usageSource());
             // 断开时不补写缓冲区：已经落库的留下，没来得及写的就丢了，最多丢一个 flush 周期。
             messages.markInterrupted(ids.assistantMessageId(), null, REASON_CLIENT_CLOSED);
             restorePreviousIfEmpty(retryOfMessageId, ids.assistantMessageId(), emittedChars.get());
@@ -274,21 +288,25 @@ public class ChatStreamService {
             log.warn("模型超时 sessionId={} messageId={} reason={}",
                     sessionId, ids.assistantMessageId(), ex.getMessage());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    retryOfMessageId, REASON_SERVER_TIMEOUT, ex.errorCode());
+                    retryOfMessageId, REASON_SERVER_TIMEOUT, ex.errorCode(),
+                    model.modelName(), model.usageSource());
         } catch (ModelRateLimitException ex) {
             log.warn("模型限流 sessionId={} messageId={}", sessionId, ids.assistantMessageId());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode());
+                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode(),
+                    model.modelName(), model.usageSource());
         } catch (ModelException ex) {
             log.warn("模型调用失败 sessionId={} messageId={} reason={}",
                     sessionId, ids.assistantMessageId(), ex.getMessage());
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode());
+                    retryOfMessageId, REASON_MODEL_ERROR, ex.errorCode(),
+                    model.modelName(), model.usageSource());
         } catch (RuntimeException ex) {
             log.error("生成过程中出现未预期异常 sessionId={} messageId={}",
                     sessionId, ids.assistantMessageId(), ex);
             convergeFailure(sink, userId, ids, buffer, emittedChars, startedAt, firstTokenAt,
-                    retryOfMessageId, REASON_MODEL_ERROR, ErrorCode.MODEL_CALL_FAILED);
+                    retryOfMessageId, REASON_MODEL_ERROR, ErrorCode.MODEL_CALL_FAILED,
+                    model.modelName(), model.usageSource());
         } finally {
             stopHeartbeat(heartbeat);
             sink.complete();
@@ -302,9 +320,10 @@ public class ChatStreamService {
      */
     private void convergeFailure(SseSink sink, long userId, TurnIds ids, StreamBuffer buffer,
                                  AtomicInteger emittedChars, long startedAt, AtomicLong firstTokenAt,
-                                 Long retryOfMessageId, String reason, ErrorCode code) {
+                                 Long retryOfMessageId, String reason, ErrorCode code,
+                                 String modelName, int usageSource) {
         boolean emitted = emittedChars.get() > 0;
-        recordUsage(userId, model.modelName(), 0, 0, startedAt, firstTokenAt, reason, false);
+        recordUsage(userId, modelName, 0, 0, startedAt, firstTokenAt, reason, false, usageSource);
         try {
             if (emitted) {
                 messages.markInterrupted(ids.assistantMessageId(), buffer.pendingText(), reason);
@@ -380,7 +399,8 @@ public class ChatStreamService {
      *                  主模型限流降级到备用模型后，成本要算在备用模型头上
      */
     private void recordUsage(long userId, String modelName, int promptTokens, int completionTokens,
-                             long startedAt, AtomicLong firstTokenAt, String finishReason, boolean success) {
+                             long startedAt, AtomicLong firstTokenAt, String finishReason, boolean success,
+                             int usageSource) {
         Integer firstTokenMs = firstTokenAt.get() < 0
                 ? null
                 : (int) (firstTokenAt.get() - startedAt);
@@ -393,7 +413,7 @@ public class ChatStreamService {
                     (int) (System.currentTimeMillis() - startedAt),
                     firstTokenMs,
                     finishReason,
-                    model.usageSource(),
+                    usageSource,
                     success));
         } catch (DataAccessException ex) {
             // 用量没记上不该连累用户已经拿到的回答

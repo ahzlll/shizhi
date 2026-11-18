@@ -4,8 +4,10 @@ import com.ahz.shizhi.auth.CurrentUser;
 import com.ahz.shizhi.auth.UserPrincipal;
 import com.ahz.shizhi.chat.dto.CreateSessionRequest;
 import com.ahz.shizhi.chat.dto.MessageView;
+import com.ahz.shizhi.chat.dto.PinSessionRequest;
 import com.ahz.shizhi.chat.dto.SendMessageRequest;
 import com.ahz.shizhi.chat.dto.SessionView;
+import com.ahz.shizhi.chat.dto.UpdateSessionRequest;
 import com.ahz.shizhi.common.api.ApiResponse;
 import com.ahz.shizhi.common.api.CursorPage;
 import com.ahz.shizhi.common.api.PageResult;
@@ -13,7 +15,9 @@ import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -53,6 +57,30 @@ public class SessionController {
     public ApiResponse<SessionView> create(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
                                           @Valid @RequestBody(required = false) CreateSessionRequest request) {
         return ApiResponse.ok(sessionService.create(principal.userId(), request));
+    }
+
+    /** 改名。只改标题，不动消息与活跃时间。 */
+    @PatchMapping("/{id}")
+    public ApiResponse<SessionView> rename(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                                           @PathVariable long id,
+                                           @Valid @RequestBody UpdateSessionRequest request) {
+        return ApiResponse.ok(sessionService.rename(principal.userId(), id, request.title()));
+    }
+
+    /** 置顶 / 取消置顶。 */
+    @PatchMapping("/{id}/pin")
+    public ApiResponse<SessionView> pin(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                                        @PathVariable long id,
+                                        @Valid @RequestBody PinSessionRequest request) {
+        return ApiResponse.ok(sessionService.pin(principal.userId(), id, request.pinned()));
+    }
+
+    /** 删除会话连同它的消息。 */
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                                    @PathVariable long id) {
+        sessionService.delete(principal.userId(), id);
+        return ApiResponse.ok(null);
     }
 
     /** 会话列表。按最后活跃时间倒序，新建的会话立刻排在最前。 */

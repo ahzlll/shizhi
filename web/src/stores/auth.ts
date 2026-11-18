@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { avatarUrl, getProfile, type ProfileView } from '@/api/account'
 import { http } from '@/api/http'
 
 export interface TokenResponse {
@@ -28,9 +29,14 @@ export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref(localStorage.getItem(ACCESS_KEY) ?? '')
   const refreshToken = ref(localStorage.getItem(REFRESH_KEY) ?? '')
   const user = ref<UserProfile | null>(null)
+  const profile = ref<ProfileView | null>(null)
 
   const isLoggedIn = computed(() => Boolean(accessToken.value))
-  const displayName = computed(() => user.value?.username ?? '同学')
+  const displayName = computed(
+    () => profile.value?.nickname || profile.value?.username || user.value?.username || '同学',
+  )
+  const avatar = computed(() => avatarUrl(profile.value))
+  const initial = computed(() => displayName.value.slice(0, 1).toUpperCase())
 
   function setTokens(tokens: TokenResponse) {
     accessToken.value = tokens.accessToken
@@ -43,6 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = ''
     refreshToken.value = ''
     user.value = null
+    profile.value = null
     localStorage.removeItem(ACCESS_KEY)
     localStorage.removeItem(REFRESH_KEY)
   }
@@ -59,6 +66,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function loadMe() {
     user.value = await http.get<UserProfile>('/auth/me')
+    await loadProfile().catch(() => undefined)
+  }
+
+  async function loadProfile() {
+    profile.value = await getProfile()
+  }
+
+  function setProfile(next: ProfileView) {
+    profile.value = next
   }
 
   async function refresh() {
@@ -78,11 +94,16 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken,
     refreshToken,
     user,
+    profile,
     isLoggedIn,
     displayName,
+    avatar,
+    initial,
     login,
     register,
     loadMe,
+    loadProfile,
+    setProfile,
     refresh,
     clear,
   }

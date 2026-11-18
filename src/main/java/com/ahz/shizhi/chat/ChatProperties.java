@@ -21,7 +21,12 @@ public record ChatProperties(
         Duration flushInterval,
         int flushMinChars,
         Duration emitterTimeout,
-        Duration reconcileInterval
+        Duration reconcileInterval,
+        /**
+         * 第一轮回答结束后让模型起标题。测试里关掉：脚本化模型按顺序出牌，
+         * 多这一次调用会把后续用例的脚本顶掉。
+         */
+        Boolean generateTitle
 ) {
 
     public ChatProperties {
@@ -40,6 +45,9 @@ public record ChatProperties(
         }
         if (reconcileInterval == null) {
             reconcileInterval = Duration.ofMinutes(5);
+        }
+        if (generateTitle == null) {
+            generateTitle = Boolean.TRUE;
         }
     }
 }

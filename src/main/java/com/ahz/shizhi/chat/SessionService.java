@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class SessionService {
@@ -23,10 +24,49 @@ public class SessionService {
 
     private final SessionRepository sessions;
     private final MessageRepository messages;
+    private final TransactionTemplate transaction;
 
-    public SessionService(SessionRepository sessions, MessageRepository messages) {
+    public SessionService(SessionRepository sessions, MessageRepository messages,
+                          TransactionTemplate transaction) {
         this.sessions = sessions;
         this.messages = messages;
+        this.transaction = transaction;
+    }
+
+    /** 改名。影响行数为 0 时再查一次归属，好把「不存在」和「不是你的」分开报。 */
+    public SessionView rename(long userId, long sessionId, String title) {
+        int updated = sessions.updateTitle(sessionId, userId, title.strip());
+        if (updated == 0) {
+            requireOwnership(userId, sessionId);
+            throw new BusinessException(ErrorCode.SESSION_NOT_FOUND);
+        }
+        return sessions.findById(sessionId).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
+    /**
+     * 置顶 / 取消置顶。影响行数为 0 时再查一次归属，和改名一样区分「不存在」与「不是你的」。
+     */
+    public SessionView pin(long userId, long sessionId, boolean pinned) {
+        int updated = sessions.updatePinned(sessionId, userId, pinned);
+        if (updated == 0) {
+            requireOwnership(userId, sessionId);
+            throw new BusinessException(ErrorCode.SESSION_NOT_FOUND);
+        }
+        return sessions.findById(sessionId).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
+    /**
+     * 删除会话连同它的消息。表上没有级联删除，必须自己按顺序删，
+     * 否则外键会把删除拦下来；两步放在一个事务里，避免删了消息没删会话。
+     */
+    public void delete(long userId, long sessionId) {
+        requireOwnership(userId, sessionId);
+        transaction.executeWithoutResult(status -> {
+            messages.deleteBySession(sessionId);
+            sessions.deleteById(sessionId, userId);
+        });
     }
 
     /** 请求体整个都可以不带，所以这里必须接住 null——不带 body 建会话是正常调用。 */
