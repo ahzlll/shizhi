@@ -1,5 +1,6 @@
 package com.ahz.shizhi.chat.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.NotBlank;
  * 拿到的不该是一个已经开了流的 SSE 连接。
  */
 public record SendMessageRequest(
+        @Schema(example = "用一句话说明什么是线程池")
         @NotBlank(message = "不能为空") String content
 ) {
 }

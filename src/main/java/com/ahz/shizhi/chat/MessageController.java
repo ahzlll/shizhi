@@ -2,6 +2,7 @@ package com.ahz.shizhi.chat;
 
 import com.ahz.shizhi.auth.CurrentUser;
 import com.ahz.shizhi.auth.UserPrincipal;
+import io.swagger.v3.oas.annotations.Parameter;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,7 +31,8 @@ public class MessageController {
      * 所以这些失败是普通 JSON，而不是一个已经建立的流。
      */
     @PostMapping("/{id}/regenerate")
-    public SseEmitter regenerate(@CurrentUser UserPrincipal principal, @PathVariable long id) {
+    public SseEmitter regenerate(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                                 @PathVariable long id) {
         return chatStreamService.regenerate(principal.userId(), id);
     }
 }

@@ -1,5 +1,6 @@
 package com.ahz.shizhi.auth.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -7,9 +8,11 @@ import jakarta.validation.constraints.NotBlank;
  */
 public record LoginRequest(
 
+        @Schema(example = "smoke18")
         @NotBlank(message = "不能为空")
         String account,
 
+        @Schema(example = "pass12345")
         @NotBlank(message = "不能为空")
         String password
 ) {

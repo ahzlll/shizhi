@@ -9,6 +9,7 @@ import com.ahz.shizhi.chat.dto.SessionView;
 import com.ahz.shizhi.common.api.ApiResponse;
 import com.ahz.shizhi.common.api.CursorPage;
 import com.ahz.shizhi.common.api.PageResult;
+import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -49,7 +50,7 @@ public class SessionController {
      * {@code title} 此刻为空，发第一条消息时才截取问题的前 30 个字。
      */
     @PostMapping
-    public ApiResponse<SessionView> create(@CurrentUser UserPrincipal principal,
+    public ApiResponse<SessionView> create(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
                                           @Valid @RequestBody(required = false) CreateSessionRequest request) {
         return ApiResponse.ok(sessionService.create(principal.userId(), request));
     }
@@ -57,7 +58,7 @@ public class SessionController {
     /** 会话列表。按最后活跃时间倒序，新建的会话立刻排在最前。 */
     @GetMapping
     public ApiResponse<PageResult<SessionView>> list(
-            @CurrentUser UserPrincipal principal,
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
             @RequestParam(defaultValue = DEFAULT_PAGE) @Min(value = 1, message = "不能小于 1") int page,
             @RequestParam(defaultValue = DEFAULT_SIZE)
             @Min(value = 1, message = "不能小于 1")
@@ -72,7 +73,7 @@ public class SessionController {
      * （1000 / 2004 / 1004）——一个已经建立的 SSE 连接是没法回 400 的。
      */
     @PostMapping("/{id}/messages")
-    public SseEmitter send(@CurrentUser UserPrincipal principal,
+    public SseEmitter send(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
                            @PathVariable long id,
                            @Valid @RequestBody SendMessageRequest request) {
         return chatStreamService.stream(principal.userId(), id, request.content());
@@ -84,7 +85,7 @@ public class SessionController {
      */
     @GetMapping("/{id}/messages")
     public ApiResponse<CursorPage<MessageView>> messages(
-            @CurrentUser UserPrincipal principal,
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
             @PathVariable long id,
             @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = DEFAULT_SIZE)

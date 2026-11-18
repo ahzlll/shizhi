@@ -6,6 +6,7 @@ import com.ahz.shizhi.auth.dto.RegisterRequest;
 import com.ahz.shizhi.auth.dto.TokenResponse;
 import com.ahz.shizhi.auth.dto.UserProfile;
 import com.ahz.shizhi.common.api.ApiResponse;
+import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,7 +44,7 @@ public class AuthController {
      * 没有这个接口，前端只能把用户信息塞进 localStorage——令牌过期了也看不出来。
      */
     @GetMapping("/me")
-    public ApiResponse<UserProfile> me(@CurrentUser UserPrincipal principal) {
+    public ApiResponse<UserProfile> me(@Parameter(hidden = true) @CurrentUser UserPrincipal principal) {
         return ApiResponse.ok(authService.profile(principal.userId()));
     }
 }

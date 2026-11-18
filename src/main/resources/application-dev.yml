@@ -10,6 +10,8 @@ shizhi:
   jwt:
     # 本地专用，生产必须用环境变量覆盖。长度不足 32 字节启动会直接失败
     secret: ${SHIZHI_JWT_SECRET:shizhi-local-dev-secret-key-do-not-use-in-prod}
+    # 开发环境放长，调试时不用反复登录；生产走 prod profile，不读这个文件
+    access-ttl: 2h
   model:
     # 本地默认接真实模型；没有 key 时把 provider 改成 stub 即可跑通整条链路
     provider: openai-compatible
