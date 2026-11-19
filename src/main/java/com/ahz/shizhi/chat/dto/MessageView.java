@@ -27,6 +27,11 @@ public record MessageView(
         Long supersededBy,
         List<Long> refNoteIds,
         List<Long> refConceptIds,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        /** 这一轮送进模型的 token 数，没走完的回答为空 */
+        Integer promptTokens,
+        Integer completionTokens,
+        /** 这一轮实际用的模型，老数据为空 */
+        String model
 ) {
 }

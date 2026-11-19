@@ -58,20 +58,68 @@ public class SessionService {
     }
 
     /**
-     * 删除会话连同它的消息。表上没有级联删除，必须自己按顺序删，
-     * 否则外键会把删除拦下来；两步放在一个事务里，避免删了消息没删会话。
+     * 删除会话：移进回收站，不真删。
+     *
+     * <p>以前是连消息一起硬删，手滑一次就找不回来。现在只打 {@code deleted_at}，
+     * 列表和搜索都不再返回，30 天后由定时任务彻底清理。
      */
     public void delete(long userId, long sessionId) {
         requireOwnership(userId, sessionId);
-        transaction.executeWithoutResult(status -> {
-            messages.deleteBySession(sessionId);
-            sessions.deleteById(sessionId, userId);
-        });
+        if (sessions.deleteById(sessionId, userId) == 0) {
+            throw new BusinessException(ErrorCode.SESSION_NOT_FOUND);
+        }
+    }
+
+    /** 批量移入回收站，返回实际受影响条数。 */
+    public int deleteBatch(long userId, List<Long> ids) {
+        return sessions.softDeleteBatch(userId, ids);
+    }
+
+    public int restoreBatch(long userId, List<Long> ids) {
+        return sessions.restoreBatch(userId, ids);
+    }
+
+    public int purgeBatch(long userId, List<Long> ids) {
+        return sessions.purgeBatch(userId, ids);
+    }
+
+    public List<SessionView> trash(long userId) {
+        return sessions.findDeleted(userId);
+    }
+
+    /** 恢复：清掉删除标记，会话回到列表里，消息一条没少。 */
+    public SessionView restore(long userId, long sessionId) {
+        if (sessions.restore(sessionId, userId) == 0) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "回收站里没有这条会话");
+        }
+        return sessions.findById(sessionId).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
+    /** 彻底删除，只对回收站里的会话生效，防止绕过回收站直接抹掉一条正常会话。 */
+    public void purge(long userId, long sessionId) {
+        if (sessions.purge(sessionId, userId) == 0) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "回收站里没有这条会话");
+        }
+    }
+
+    /** 定时任务调用：清掉超过保留期的会话。 */
+    public int purgeExpired(int retentionDays) {
+        return sessions.purgeExpired(retentionDays);
     }
 
     /** 请求体整个都可以不带，所以这里必须接住 null——不带 body 建会话是正常调用。 */
     public SessionView create(long userId, CreateSessionRequest request) {
         return sessions.insert(userId, normalizeSkillCode(request));
+    }
+
+    /** 关键词搜会话：标题命中或任意消息正文命中。空关键词直接返回空，别把整库拉出来。 */
+    public List<SessionView> search(long userId, String keyword) {
+        String trimmed = keyword == null ? "" : keyword.strip();
+        if (trimmed.isEmpty()) {
+            return List.of();
+        }
+        return sessions.search(userId, trimmed, 20);
     }
 
     public PageResult<SessionView> list(long userId, int page, int size) {

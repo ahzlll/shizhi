@@ -26,7 +26,9 @@ public record ChatProperties(
          * 第一轮回答结束后让模型起标题。测试里关掉：脚本化模型按顺序出牌，
          * 多这一次调用会把后续用例的脚本顶掉。
          */
-        Boolean generateTitle
+        Boolean generateTitle,
+        /** 上下文上限，只用于前端展示占比；不参与裁剪逻辑。 */
+        Integer contextWindow
 ) {
 
     public ChatProperties {
@@ -48,6 +50,9 @@ public record ChatProperties(
         }
         if (generateTitle == null) {
             generateTitle = Boolean.TRUE;
+        }
+        if (contextWindow == null || contextWindow <= 0) {
+            contextWindow = 32768;
         }
     }
 }

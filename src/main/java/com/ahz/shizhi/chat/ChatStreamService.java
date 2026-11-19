@@ -52,6 +52,9 @@ public class ChatStreamService {
     private static final String EVENT_ERROR = "error";
     private static final String EVENT_HEARTBEAT = "heartbeat";
 
+    /** 一次最多读这么多条历史再交给预算裁剪，避免把整会话拉进内存。 */
+    private static final int HISTORY_LOAD_LIMIT = 200;
+
     private static final String ROLE_USER = "user";
     private static final String ROLE_ASSISTANT = "assistant";
 
@@ -74,6 +77,8 @@ public class ChatStreamService {
     private final MessageRepository messages;
     private final UsageRepository usage;
     private final PromptBuilder promptBuilder;
+    private final ContextAssembler contextAssembler;
+    private final HistorySummarizer historySummarizer;
     private final UserModelClientFactory modelClients;
     private final SessionTitleService titleService;
     private final ChatProperties chatProperties;
@@ -85,6 +90,8 @@ public class ChatStreamService {
                              MessageRepository messages,
                              UsageRepository usage,
                              PromptBuilder promptBuilder,
+                             ContextAssembler contextAssembler,
+                             HistorySummarizer historySummarizer,
                              UserModelClientFactory modelClients,
                              SessionTitleService titleService,
                              ChatProperties chatProperties,
@@ -95,12 +102,41 @@ public class ChatStreamService {
         this.messages = messages;
         this.usage = usage;
         this.promptBuilder = promptBuilder;
+        this.contextAssembler = contextAssembler;
+        this.historySummarizer = historySummarizer;
         this.modelClients = modelClients;
         this.titleService = titleService;
         this.chatProperties = chatProperties;
         this.transaction = transaction;
         this.executor = executor;
         this.scheduler = scheduler;
+    }
+
+    /**
+     * 编辑已发出的提问并重新回答。
+     *
+     * <p>这条消息之后的问答全部删掉：后面的回答是围绕旧问题生成的，留着会让上下文自相矛盾。
+     * 删除和重新落库分两步，不放在同一事务里——中间要让模型调用看到干净的历史。
+     */
+    public SseEmitter editAndResend(long userId, long messageId, String content) {
+        MessageRepository.EditableMessage target = messages.findEditable(messageId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "消息不存在"));
+        if (target.userId() != userId) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权修改该消息");
+        }
+        if (!ROLE_USER.equals(target.role())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "只能修改自己的提问");
+        }
+        sessionService.requireOwnership(userId, target.sessionId());
+
+        String question = content.strip();
+        transaction.executeWithoutResult(status -> {
+            messages.deleteFrom(target.sessionId(), messageId);
+            messages.recountMessages(target.sessionId());
+        });
+
+        TurnIds ids = persistTurn(userId, target.sessionId(), question);
+        return startStreaming(userId, target.sessionId(), ids, null, question);
     }
 
     /**
@@ -242,8 +278,12 @@ public class ChatStreamService {
                 throw new ClientClosedException();
             }
 
-            List<Turn> prompt = promptBuilder.build(
-                    messages.recentTurns(sessionId, PromptBuilder.HISTORY_MESSAGE_LIMIT));
+            // 先按预算挑出装得下的最近若干条，装不下的更早消息交给摘要
+            ContextAssembler.Selection selection = contextAssembler.select(
+                    messages.recentTurns(sessionId, HISTORY_LOAD_LIMIT),
+                    chatProperties.contextWindow() / 3);
+            String historySummary = historySummarizer.summarize(model, selection.dropped());
+            List<Turn> prompt = promptBuilder.build(historySummary, selection.included());
 
             ModelResult result = model.stream(prompt, delta -> {
                 if (!sink.send(EVENT_DELTA, new StreamEvent.Delta(delta))) {
@@ -265,12 +305,12 @@ public class ChatStreamService {
 
             // 提交点：末尾剩余内容 + stream_state=1 一次写完，且是最后一个写库动作
             messages.markCompleted(ids.assistantMessageId(), buffer.pendingText(),
-                    result.promptTokens(), result.completionTokens());
+                    result.promptTokens(), result.completionTokens(), result.model());
             buffer.commit();
 
             sink.send(EVENT_DONE, new StreamEvent.Done(ids.assistantMessageId(),
                     result.promptTokens(), result.completionTokens(),
-                    System.currentTimeMillis() - startedAt, result.finishReason()));
+                    System.currentTimeMillis() - startedAt, result.finishReason(), result.model()));
 
             // done 已经发出去，这里再花一两秒让模型起个标题，不占用用户的等待时间
             if (chatProperties.generateTitle() && question != null

@@ -2,9 +2,12 @@ package com.ahz.shizhi.chat;
 
 import com.ahz.shizhi.auth.CurrentUser;
 import com.ahz.shizhi.auth.UserPrincipal;
+import com.ahz.shizhi.chat.dto.SendMessageRequest;
 import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -34,5 +37,16 @@ public class MessageController {
     public SseEmitter regenerate(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
                                  @PathVariable long id) {
         return chatStreamService.regenerate(principal.userId(), id);
+    }
+
+    /**
+     * 编辑自己发出的提问并重新回答。这条消息之后的问答会被删除，
+     * 事件序列与发消息一致，前端沿用同一套解析。
+     */
+    @PostMapping("/{id}/edit")
+    public SseEmitter edit(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                           @PathVariable long id,
+                           @Valid @RequestBody SendMessageRequest request) {
+        return chatStreamService.editAndResend(principal.userId(), id, request.content());
     }
 }

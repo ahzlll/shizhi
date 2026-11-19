@@ -1,11 +1,15 @@
 package com.ahz.shizhi.chat;
 
+import java.util.List;
+
 import com.ahz.shizhi.auth.CurrentUser;
 import com.ahz.shizhi.auth.UserPrincipal;
+import com.ahz.shizhi.chat.dto.BatchSessionRequest;
 import com.ahz.shizhi.chat.dto.CreateSessionRequest;
 import com.ahz.shizhi.chat.dto.MessageView;
 import com.ahz.shizhi.chat.dto.PinSessionRequest;
 import com.ahz.shizhi.chat.dto.SendMessageRequest;
+import com.ahz.shizhi.chat.dto.SessionContextView;
 import com.ahz.shizhi.chat.dto.SessionView;
 import com.ahz.shizhi.chat.dto.UpdateSessionRequest;
 import com.ahz.shizhi.common.api.ApiResponse;
@@ -42,10 +46,14 @@ public class SessionController {
     private static final String DEFAULT_SIZE = "20";
 
     private final SessionService sessionService;
+    private final SessionContextService contextService;
     private final ChatStreamService chatStreamService;
 
-    public SessionController(SessionService sessionService, ChatStreamService chatStreamService) {
+    public SessionController(SessionService sessionService,
+                             SessionContextService contextService,
+                             ChatStreamService chatStreamService) {
         this.sessionService = sessionService;
+        this.contextService = contextService;
         this.chatStreamService = chatStreamService;
     }
 
@@ -65,6 +73,69 @@ public class SessionController {
                                            @PathVariable long id,
                                            @Valid @RequestBody UpdateSessionRequest request) {
         return ApiResponse.ok(sessionService.rename(principal.userId(), id, request.title()));
+    }
+
+    /** 关键词搜会话：标题或消息正文命中。 */
+    @GetMapping("/search")
+    public ApiResponse<List<SessionView>> search(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @RequestParam String q) {
+        return ApiResponse.ok(sessionService.search(principal.userId(), q));
+    }
+
+    /** 当前会话的模型与上下文占用。 */
+    @GetMapping("/{id}/context")
+    public ApiResponse<SessionContextView> context(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @PathVariable long id) {
+        return ApiResponse.ok(contextService.describe(principal.userId(), id));
+    }
+
+    /** 批量移入回收站。 */
+    @PostMapping("/batch/delete")
+    public ApiResponse<Integer> batchDelete(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @Valid @RequestBody BatchSessionRequest request) {
+        return ApiResponse.ok(sessionService.deleteBatch(principal.userId(), request.ids()));
+    }
+
+    /** 批量恢复。 */
+    @PostMapping("/batch/restore")
+    public ApiResponse<Integer> batchRestore(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @Valid @RequestBody BatchSessionRequest request) {
+        return ApiResponse.ok(sessionService.restoreBatch(principal.userId(), request.ids()));
+    }
+
+    /** 批量彻底删除。 */
+    @PostMapping("/batch/purge")
+    public ApiResponse<Integer> batchPurge(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @Valid @RequestBody BatchSessionRequest request) {
+        return ApiResponse.ok(sessionService.purgeBatch(principal.userId(), request.ids()));
+    }
+
+    /** 回收站列表，按删除时间倒序。 */
+    @GetMapping("/trash")
+    public ApiResponse<List<SessionView>> trash(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal) {
+        return ApiResponse.ok(sessionService.trash(principal.userId()));
+    }
+
+    /** 从回收站恢复。 */
+    @PostMapping("/{id}/restore")
+    public ApiResponse<SessionView> restore(
+            @Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+            @PathVariable long id) {
+        return ApiResponse.ok(sessionService.restore(principal.userId(), id));
+    }
+
+    /** 彻底删除，只对回收站里的会话生效。 */
+    @DeleteMapping("/{id}/purge")
+    public ApiResponse<Void> purge(@Parameter(hidden = true) @CurrentUser UserPrincipal principal,
+                                   @PathVariable long id) {
+        sessionService.purge(principal.userId(), id);
+        return ApiResponse.ok(null);
     }
 
     /** 置顶 / 取消置顶。 */

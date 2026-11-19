@@ -17,7 +17,8 @@ public sealed interface StreamEvent {
     record Delta(String text) implements StreamEvent {
     }
 
-    record Done(long messageId, int promptTokens, int completionTokens, long elapsedMs, String finishReason)
+    record Done(long messageId, int promptTokens, int completionTokens, long elapsedMs,
+                String finishReason, String model)
             implements StreamEvent {
     }
 

@@ -33,11 +33,15 @@ public class MessageRepository {
             rs.getObject("superseded_by", Long.class),
             readIdArray(rs, "ref_note_ids"),
             readIdArray(rs, "ref_concept_ids"),
-            rs.getObject("created_at", OffsetDateTime.class));
+            rs.getObject("created_at", OffsetDateTime.class),
+            rs.getObject("prompt_tokens", Integer.class),
+            rs.getObject("completion_tokens", Integer.class),
+            rs.getString("model"));
 
     private static final String SELECT_COLUMNS =
             "SELECT id, role, content, stream_state, interrupt_reason, superseded_by,"
-                    + " ref_note_ids, ref_concept_ids, created_at FROM chat_message";
+                    + " ref_note_ids, ref_concept_ids, created_at, prompt_tokens, completion_tokens, model"
+                    + " FROM chat_message";
 
     /**
      * 收敛阈值必须大于模型总超时（{@code shizhi.model.total-timeout}，当前 180s）。
@@ -119,6 +123,63 @@ public class MessageRepository {
         return jdbc.update("DELETE FROM chat_message WHERE session_id = ?", sessionId);
     }
 
+    /**
+     * 删掉某条用户消息及其之后的所有消息，用于「编辑并重发」。
+     * 之后的回答依赖原来的提问，留着只会让上下文自相矛盾。
+     */
+    public int deleteFrom(long sessionId, long fromMessageId) {
+        return jdbc.update("DELETE FROM chat_message WHERE session_id = ? AND id >= ?",
+                sessionId, fromMessageId);
+    }
+
+    /** 删完消息后按实际行数重算计数，避免和缓存值越差越远。 */
+    public void recountMessages(long sessionId) {
+        jdbc.update("UPDATE chat_session SET message_count ="
+                + " (SELECT count(*) FROM chat_message WHERE session_id = ?) WHERE id = ?",
+                sessionId, sessionId);
+    }
+
+    /** 编辑重发前的归属校验：只允许改自己的、角色为 user、且属于该会话的消息。 */
+    public java.util.Optional<EditableMessage> findEditable(long messageId) {
+        return jdbc.query(
+                        "SELECT id, session_id, user_id, role FROM chat_message WHERE id = ?",
+                        (rs, rowNum) -> new EditableMessage(
+                                rs.getLong("id"),
+                                rs.getLong("session_id"),
+                                rs.getLong("user_id"),
+                                rs.getString("role")),
+                        messageId)
+                .stream()
+                .findFirst();
+    }
+
+    public record EditableMessage(long id, long sessionId, long userId, String role) {
+    }
+
+    /**
+     * 最近一次成功调用的 token 总量，用作「上下文占用」的真实来源。
+     * 只看 assistant 行：只有它带 usage，且被重试替代的旧行不参与。
+     */
+    public java.util.Optional<Integer> latestUsageTokens(long sessionId) {
+        return jdbc.query(
+                        "SELECT COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0) AS total"
+                                + " FROM chat_message WHERE session_id = ? AND role = 'assistant'"
+                                + " AND prompt_tokens IS NOT NULL ORDER BY id DESC LIMIT 1",
+                        (rs, rowNum) -> rs.getInt("total"),
+                        sessionId)
+                .stream()
+                .findFirst();
+    }
+
+    /** 没有 usage 时的兜底：按正文长度估算，只算还生效的消息。 */
+    public long activeChars(long sessionId) {
+        Long total = jdbc.queryForObject(
+                "SELECT COALESCE(sum(length(content)), 0) FROM chat_message"
+                        + " WHERE session_id = ? AND superseded_by IS NULL",
+                Long.class, sessionId);
+        return total == null ? 0L : total;
+    }
+
     /** 判断是不是第一轮：标题只在第一轮结束时生成一次。 */
     public int countUserMessages(long sessionId) {
         Integer total = jdbc.queryForObject(
@@ -177,10 +238,11 @@ public class MessageRepository {
      *
      * <p>末尾内容一并写入（{@code content || ?}），省掉一次"先 flush 再标完成"的两次写。
      */
-    public int markCompleted(long messageId, String tail, int promptTokens, int completionTokens) {
+    public int markCompleted(long messageId, String tail, int promptTokens, int completionTokens,
+                             String model) {
         return jdbc.update("UPDATE chat_message SET content = content || ?, stream_state = 1,"
-                        + " prompt_tokens = ?, completion_tokens = ?, updated_at = now() WHERE id = ?",
-                tail == null ? "" : tail, promptTokens, completionTokens, messageId);
+                        + " prompt_tokens = ?, completion_tokens = ?, model = ?, updated_at = now() WHERE id = ?",
+                tail == null ? "" : tail, promptTokens, completionTokens, model, messageId);
     }
 
     /**

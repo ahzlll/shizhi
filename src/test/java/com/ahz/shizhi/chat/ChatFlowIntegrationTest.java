@@ -671,10 +671,12 @@ class ChatFlowIntegrationTest {
 
         Resp deleted = delete("/api/sessions/" + sessionId, owner.token());
         assertThat(deleted.status()).isEqualTo(200);
-        assertThat(rawMessageCount(sessionId)).isZero();
+        // 现在是软删：会话还在，只是打了删除标记，消息一条没动，30 天内可恢复
+        assertThat(rawMessageCount(sessionId)).isEqualTo(1);
         Integer sessionRows = jdbc.queryForObject(
-                "SELECT count(*) FROM chat_session WHERE id = ?", Integer.class, sessionId);
-        assertThat(sessionRows).isZero();
+                "SELECT count(*) FROM chat_session WHERE id = ? AND deleted_at IS NOT NULL",
+                Integer.class, sessionId);
+        assertThat(sessionRows).isEqualTo(1);
     }
 
     @Test
@@ -689,6 +691,70 @@ class ChatFlowIntegrationTest {
 
         Resp list = get("/api/sessions?page=1&size=10", owner.token());
         assertThat(sessionIds(list.body())).startsWith(older);
+    }
+
+    @Test
+    void deletedSessionGoesToTrashAndCanBeRestored() throws Exception {
+        Account owner = newUser("tr");
+        long sessionId = createSession(owner.token(), "{}");
+
+        assertThat(delete("/api/sessions/" + sessionId, owner.token()).status()).isEqualTo(200);
+
+        // 软删：列表看不见，回收站看得见
+        assertThat(sessionIds(get("/api/sessions?page=1&size=10", owner.token()).body()))
+                .doesNotContain(sessionId);
+        assertThat(sessionIds(get("/api/sessions/trash", owner.token()).body()))
+                .contains(sessionId);
+
+        assertThat(post("/api/sessions/" + sessionId + "/restore", "{}", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(sessionIds(get("/api/sessions?page=1&size=10", owner.token()).body()))
+                .contains(sessionId);
+
+        // 再删一次，然后彻底删除，回收站里也不该再有
+        assertThat(delete("/api/sessions/" + sessionId, owner.token()).status()).isEqualTo(200);
+        assertThat(delete("/api/sessions/" + sessionId + "/purge", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(sessionIds(get("/api/sessions/trash", owner.token()).body()))
+                .doesNotContain(sessionId);
+    }
+
+    @Test
+    void batchOperationsHandleMultipleSessions() throws Exception {
+        Account owner = newUser("bt");
+        long first = createSession(owner.token(), "{}");
+        long second = createSession(owner.token(), "{}");
+        String ids = "[" + first + "," + second + "]";
+
+        assertThat(post("/api/sessions/batch/delete", "{\"ids\":" + ids + "}", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(sessionIds(get("/api/sessions?page=1&size=10", owner.token()).body()))
+                .doesNotContain(first, second);
+        assertThat(sessionIds(get("/api/sessions/trash", owner.token()).body()))
+                .contains(first, second);
+
+        assertThat(post("/api/sessions/batch/restore", "{\"ids\":" + ids + "}", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(sessionIds(get("/api/sessions?page=1&size=10", owner.token()).body()))
+                .contains(first, second);
+
+        assertThat(post("/api/sessions/batch/delete", "{\"ids\":" + ids + "}", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(post("/api/sessions/batch/purge", "{\"ids\":" + ids + "}", owner.token()).status())
+                .isEqualTo(200);
+        assertThat(sessionIds(get("/api/sessions/trash", owner.token()).body()))
+                .doesNotContain(first, second);
+    }
+
+    @Test
+    void contextEndpointReportsEmptySession() throws Exception {
+        Account owner = newUser("cx");
+        long sessionId = createSession(owner.token(), "{}");
+
+        Resp resp = get("/api/sessions/" + sessionId + "/context", owner.token());
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.body()).contains("\"usedTokens\":0");
+        assertThat(resp.body()).contains("\"contextWindow\":32768");
     }
 
     private Account newUser(String prefix) throws Exception {

@@ -15,6 +15,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param messageCount   冗余计数，含占位行与被替代的行，仅用于粗略展示
  * @param lastActiveAt   会话列表的排序依据
  * @param pinned         置顶的会话排在最前
+ * @param deletedAt      非空表示在回收站里，只有回收站列表会返回这类会话
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record SessionView(
@@ -24,6 +25,7 @@ public record SessionView(
         int messageCount,
         OffsetDateTime lastActiveAt,
         OffsetDateTime createdAt,
-        boolean pinned
+        boolean pinned,
+        OffsetDateTime deletedAt
 ) {
 }
