@@ -48,6 +48,12 @@ const router = createRouter({
       component: () => import('@/views/FeedbackView.vue'),
       meta: { requiresAuth: true, title: '意见反馈' },
     },
+    {
+      path: '/trash',
+      name: 'trash',
+      component: () => import('@/views/TrashView.vue'),
+      meta: { requiresAuth: true, title: '回收站' },
+    },
   ],
 })
 

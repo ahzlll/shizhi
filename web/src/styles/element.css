@@ -56,3 +56,42 @@ html[data-theme="dark"]:root {
   --el-button-active-bg-color: var(--sz-brand-deep);
   --el-button-active-border-color: var(--sz-brand-deep);
 }
+
+/* 悬浮提示：纯黑底白字，尺寸按最紧凑的一档固定，不跟随阅读密度变化 */
+.el-popper.is-dark {
+  background: #1a1a1a;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.el-popper.is-dark .el-popper__arrow::before {
+  background: #1a1a1a;
+  border: none;
+}
+
+/* 设置类弹窗：宽一点、内容区可滚动，窄屏自动收窄 */
+.panel-dialog {
+  max-width: 92vw;
+  border-radius: 16px;
+}
+
+.panel-dialog .el-dialog__header {
+  margin-right: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sz-line);
+}
+
+.panel-dialog .el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.panel-dialog .el-dialog__body {
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-top: 16px;
+}

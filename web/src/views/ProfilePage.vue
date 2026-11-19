@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// embedded：作为弹窗内容渲染时不带页面头与卡片外框
+defineProps<{ embedded?: boolean }>()
+
+import BrandLogo from '@/components/BrandLogo.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -69,17 +73,14 @@ async function saveNickname() {
 
 <template>
   <div class="page">
-    <header class="top-bar">
-      <div class="brand">
-        <span class="brand-mark">拾</span>
-        <span class="brand-name">拾知成图</span>
-      </div>
+    <header v-if="!embedded" class="top-bar">
+      <BrandLogo />
       <el-button link @click="router.push('/chat')">返回对话</el-button>
     </header>
 
-    <main class="content">
-      <div class="card">
-        <h1 class="card-title">个人主页</h1>
+    <main class="content" :class="{ embedded }">
+      <div class="card" :class="{ embedded }">
+        <h1 v-if="!embedded" class="card-title">个人主页</h1>
 
         <section class="avatar-row">
           <img v-if="auth.avatar" :src="auth.avatar" class="avatar" alt="头像" />
@@ -142,25 +143,8 @@ async function saveNickname() {
   justify-content: space-between;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-weight: 600;
-}
 
-.brand-name {
-  font-size: 16px;
-  letter-spacing: 1px;
-}
 
 .content {
   flex: 1;
@@ -251,5 +235,19 @@ async function saveNickname() {
 
 .meta-label {
   color: var(--sz-ink-muted);
+}
+
+/* 放进弹窗时由弹窗提供标题和留白，卡片本身不再画边框 */
+.content.embedded {
+  padding: 0;
+}
+
+.card.embedded {
+  max-width: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 </style>

@@ -2,14 +2,19 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import {
+  batchDeleteSessions,
   createSession,
   deleteSession,
+  editMessage,
   listMessages,
   listSessions,
   pinSession,
   regenerate,
   renameSession,
+  getSessionContext,
+  searchSessions,
   sendMessage,
+  type SessionContext,
   type DonePayload,
   type MessageView,
   type SessionView,
@@ -38,6 +43,13 @@ export const useChatStore = defineStore('chat', () => {
   const draft = ref<DraftMessage | null>(null)
   const streaming = computed(() => draft.value?.state === 0)
 
+  const searchResults = ref<SessionView[]>([])
+  const searching = ref(false)
+  /** 发送失败且没落库时，把原文交还给输入框 */
+  const restoreText = ref<string | null>(null)
+  /** 当前会话的模型与上下文占用，输入框上方展示 */
+  const context = ref<SessionContext | null>(null)
+
   let controller: AbortController | null = null
 
   async function loadSessions() {
@@ -61,8 +73,10 @@ export const useChatStore = defineStore('chat', () => {
     currentId.value = session.id
     messages.value = []
     draft.value = null
+    context.value = null
     nextCursor.value = null
     hasMore.value = false
+    void loadContext(session.id)
     return session.id
   }
 
@@ -95,14 +109,93 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 批量移入回收站。选中的会话里有当前会话时，切到剩下最靠前的一个。 */
+  async function batchRemove(ids: number[]) {
+    if (ids.length === 0) return
+    await batchDeleteSessions(ids)
+    sessions.value = sessions.value.filter((item) => !ids.includes(item.id))
+    if (!currentId.value || !ids.includes(currentId.value)) return
+
+    currentId.value = null
+    messages.value = []
+    draft.value = null
+    context.value = null
+    if (sessions.value.length > 0) {
+      await selectSession(sessions.value[0].id)
+    }
+  }
+
+  async function search(keyword: string) {
+    const trimmed = keyword.trim()
+    if (!trimmed) {
+      searchResults.value = []
+      return
+    }
+    searching.value = true
+    try {
+      searchResults.value = await searchSessions(trimmed)
+    } finally {
+      searching.value = false
+    }
+  }
+
+  /**
+   * 编辑已发出的提问并重新回答。后端会删掉这条消息之后的问答，
+   * 前端同步截断，避免界面上残留已经不存在的消息。
+   */
+  async function editResend(messageId: number, content: string) {
+    if (streaming.value) return
+    const index = messages.value.findIndex((item) => item.id === messageId)
+    if (index < 0) return
+
+    messages.value = messages.value.slice(0, index)
+    const tempUserId = -Date.now()
+    messages.value.push(buildUserMessage(tempUserId, content))
+    draft.value = { id: null, content: '', state: 0 }
+
+    controller = new AbortController()
+    try {
+      await editMessage(messageId, content, handlers(tempUserId), controller.signal)
+      if (draft.value?.state === 0) failDraft()
+    } catch (error) {
+      if (isAbort(error)) {
+        if (draft.value) draft.value.state = 2
+      } else {
+        failDraft(error instanceof Error ? error.message : '请求失败')
+      }
+    } finally {
+      controller = null
+    }
+  }
+
+  /** 回到空白状态：不选中任何会话，也不新建，等用户真正发问时再建。 */
+  function startNew() {
+    currentId.value = null
+    messages.value = []
+    draft.value = null
+    context.value = null
+    nextCursor.value = null
+    hasMore.value = false
+    searchResults.value = []
+  }
+
   async function selectSession(id: number) {
     if (currentId.value === id) return
     currentId.value = id
     messages.value = []
     draft.value = null
+    context.value = null
     nextCursor.value = null
     hasMore.value = false
-    await loadHistory()
+    await Promise.all([loadHistory(), loadContext(id)])
+  }
+
+  async function loadContext(sessionId: number) {
+    try {
+      context.value = await getSessionContext(sessionId)
+    } catch {
+      // 上下文展示失败不影响对话本身
+    }
   }
 
   async function loadHistory() {
@@ -118,6 +211,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 有内容就按「中断」收敛，和后台判 2/3 的口径一致；否则界面上会出现「有回答却写着没答出来」。 */
+  function failDraft(message?: string) {
+    if (!draft.value) return
+    draft.value.state = draft.value.content.trim() ? 2 : 3
+    if (message) draft.value.error = message
+  }
+
   function handlers(tempUserId: number): StreamHandlers {
     return {
       onAck: ({ userMessageId, assistantMessageId }) => {
@@ -130,16 +230,22 @@ export const useChatStore = defineStore('chat', () => {
       },
       onDone: (payload: DonePayload) => {
         if (!draft.value) return
-        messages.value.push(buildAssistantMessage(payload.messageId, draft.value.content))
+        messages.value.push(
+          buildAssistantMessage(
+            payload.messageId,
+            draft.value.content,
+            payload.promptTokens,
+            payload.completionTokens,
+            payload.model,
+          ),
+        )
         draft.value = null
-        // 标题与消息数在流结束后才定下来，重新拉一次列表比本地猜更准
+        // 标题、消息数与上下文占用在流结束后才定下来，重新拉一次比本地猜更准
         void loadSessions()
+        if (currentId.value) void loadContext(currentId.value)
       },
       onError: (payload) => {
-        if (draft.value) {
-          draft.value.state = 3
-          draft.value.error = payload.message || '模型调用失败'
-        }
+        failDraft(payload.message || '模型调用失败')
       },
     }
   }
@@ -156,16 +262,22 @@ export const useChatStore = defineStore('chat', () => {
     controller = new AbortController()
     try {
       await sendMessage(sessionId, text, handlers(tempUserId), controller.signal)
-      if (draft.value?.state === 0) draft.value.state = 3
+      if (draft.value?.state === 0) failDraft()
     } catch (error) {
       if (isAbort(error)) {
         if (draft.value) draft.value.state = 2
-      } else if (draft.value) {
-        draft.value.state = 3
-        draft.value.error = error instanceof Error ? error.message : '请求失败'
+      } else {
+        failDraft(error instanceof Error ? error.message : '请求失败')
       }
     } finally {
       controller = null
+      // 没有收到 ack 说明这条提问根本没落库：撤掉乐观插入的那条和空的回答占位，
+      // 把原文放回输入框，别让用户对着一条不存在的消息和空白气泡
+      if (draft.value && draft.value.id == null) {
+        messages.value = messages.value.filter((item) => item.id !== tempUserId)
+        draft.value = null
+        restoreText.value = text
+      }
     }
   }
 
@@ -178,13 +290,12 @@ export const useChatStore = defineStore('chat', () => {
     controller = new AbortController()
     try {
       await regenerate(messageId, handlers(-1), controller.signal)
-      if (draft.value?.state === 0) draft.value.state = 3
+      if (draft.value?.state === 0) failDraft()
     } catch (error) {
       if (isAbort(error)) {
         if (draft.value) draft.value.state = 2
-      } else if (draft.value) {
-        draft.value.state = 3
-        draft.value.error = error instanceof Error ? error.message : '请求失败'
+      } else {
+        failDraft(error instanceof Error ? error.message : '请求失败')
       }
     } finally {
       controller = null
@@ -213,14 +324,23 @@ export const useChatStore = defineStore('chat', () => {
     hasMore,
     draft,
     streaming,
+    searchResults,
+    searching,
+    restoreText,
+    context,
+    loadContext,
     loadSessions,
     ensureSession,
     newSession,
+    startNew,
     pin,
     rename,
     remove,
+    batchRemove,
     selectSession,
     loadHistory,
+    search,
+    editResend,
     send,
     retry,
     stop,
@@ -239,10 +359,19 @@ function buildUserMessage(id: number, content: string): MessageView {
     refNoteIds: null,
     refConceptIds: null,
     createdAt: new Date().toISOString(),
+    promptTokens: null,
+    completionTokens: null,
+    model: null,
   }
 }
 
-function buildAssistantMessage(id: number, content: string): MessageView {
+function buildAssistantMessage(
+  id: number,
+  content: string,
+  promptTokens: number | null = null,
+  completionTokens: number | null = null,
+  model: string | null = null,
+): MessageView {
   return {
     id,
     role: 'assistant',
@@ -253,6 +382,9 @@ function buildAssistantMessage(id: number, content: string): MessageView {
     refNoteIds: null,
     refConceptIds: null,
     createdAt: new Date().toISOString(),
+    promptTokens,
+    completionTokens,
+    model,
   }
 }
 

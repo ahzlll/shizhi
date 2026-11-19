@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// embedded：作为弹窗内容渲染时不带页面头与卡片外框
+defineProps<{ embedded?: boolean }>()
+
+import BrandLogo from '@/components/BrandLogo.vue'
 import { useRouter } from 'vue-router'
 
 import { ACCENTS, useThemeStore, type ThemeAccent, type ThemeMode } from '@/stores/theme'
@@ -18,17 +22,14 @@ function pickAccent(value: ThemeAccent) {
 
 <template>
   <div class="page">
-    <header class="top-bar">
-      <div class="brand">
-        <span class="brand-mark">拾</span>
-        <span class="brand-name">拾知成图</span>
-      </div>
+    <header v-if="!embedded" class="top-bar">
+      <BrandLogo />
       <el-button link @click="router.push('/chat')">返回对话</el-button>
     </header>
 
-    <main class="content">
-      <div class="card">
-        <h1 class="card-title">外观</h1>
+    <main class="content" :class="{ embedded }">
+      <div class="card" :class="{ embedded }">
+        <h1 v-if="!embedded" class="card-title">外观</h1>
         <p class="card-desc">只影响这台设备的显示，换设备需要重新选一次。</p>
 
         <section class="section">
@@ -64,6 +65,30 @@ function pickAccent(value: ThemeAccent) {
             </button>
           </div>
         </section>
+
+        <section class="section">
+          <h2 class="section-title">阅读密度</h2>
+          <div class="mode-list">
+            <button
+              type="button"
+              class="mode-item"
+              :class="{ active: theme.density === 'cozy' }"
+              @click="theme.setDensity('cozy')"
+            >
+              <span class="mode-label">舒适</span>
+              <span class="mode-desc">字大行疏，长回答看着不累</span>
+            </button>
+            <button
+              type="button"
+              class="mode-item"
+              :class="{ active: theme.density === 'compact' }"
+              @click="theme.setDensity('compact')"
+            >
+              <span class="mode-label">紧凑</span>
+              <span class="mode-desc">字号和间距收一档，一屏看更多</span>
+            </button>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -85,25 +110,8 @@ function pickAccent(value: ThemeAccent) {
   justify-content: space-between;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-weight: 600;
-}
 
-.brand-name {
-  font-size: 16px;
-  letter-spacing: 1px;
-}
 
 .content {
   flex: 1;
@@ -171,5 +179,19 @@ function pickAccent(value: ThemeAccent) {
 .mode-desc {
   font-size: 12px;
   color: var(--sz-ink-muted);
+}
+
+/* 放进弹窗时由弹窗提供标题和留白，卡片本身不再画边框 */
+.content.embedded {
+  padding: 0;
+}
+
+.card.embedded {
+  max-width: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 </style>

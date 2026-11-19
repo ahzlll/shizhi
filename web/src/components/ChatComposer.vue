@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
+
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   streaming: boolean
@@ -8,7 +10,20 @@ const props = defineProps<{
 
 const emit = defineEmits<{ send: [text: string]; stop: [] }>()
 
+const chat = useChatStore()
 const text = ref('')
+const inputRef = ref<{ focus: () => void }>()
+
+// 发送失败且没落库时，把原文放回输入框
+watch(
+  () => chat.restoreText,
+  (value) => {
+    if (!value) return
+    text.value = value
+    chat.restoreText = null
+    void nextTick(() => inputRef.value?.focus())
+  },
+)
 
 function submit() {
   if (props.streaming || props.disabled) return
@@ -29,11 +44,12 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <div class="composer">
     <el-input
+      ref="inputRef"
       v-model="text"
       type="textarea"
       :autosize="{ minRows: 1, maxRows: 5 }"
       resize="none"
-      placeholder="问点什么，回车发送，Shift + 回车换行"
+      placeholder="问点什么，Enter 发送，Shift + Enter 换行"
       :disabled="disabled"
       @keydown="onKeydown"
     />

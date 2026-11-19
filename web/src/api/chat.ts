@@ -10,6 +10,7 @@ export interface SessionView {
   lastActiveAt: string
   createdAt: string
   pinned: boolean
+  deletedAt: string | null
 }
 
 export interface MessageView {
@@ -22,6 +23,9 @@ export interface MessageView {
   refNoteIds: number[] | null
   refConceptIds: number[] | null
   createdAt: string
+  promptTokens: number | null
+  completionTokens: number | null
+  model: string | null
 }
 
 export interface PageResult<T> {
@@ -49,6 +53,7 @@ export interface DonePayload {
   completionTokens: number
   elapsedMs: number
   finishReason: string
+  model: string
 }
 
 export interface StreamHandlers {
@@ -96,6 +101,55 @@ export function sendMessage(
 
 export function regenerate(messageId: number, handlers: StreamHandlers, signal?: AbortSignal) {
   return stream(`/api/messages/${messageId}/regenerate`, {}, handlers, signal)
+}
+
+export function editMessage(
+  messageId: number,
+  content: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+) {
+  return stream(`/api/messages/${messageId}/edit`, { content }, handlers, signal)
+}
+
+export interface SessionContext {
+  model: string
+  usedTokens: number
+  contextWindow: number
+  percent: number
+  custom: boolean
+}
+
+export function getSessionContext(sessionId: number) {
+  return http.get<SessionContext>(`/sessions/${sessionId}/context`)
+}
+
+export function listTrash() {
+  return http.get<SessionView[]>('/sessions/trash')
+}
+
+export function batchDeleteSessions(ids: number[]) {
+  return http.post<number>('/sessions/batch/delete', { ids })
+}
+
+export function batchRestoreSessions(ids: number[]) {
+  return http.post<number>('/sessions/batch/restore', { ids })
+}
+
+export function batchPurgeSessions(ids: number[]) {
+  return http.post<number>('/sessions/batch/purge', { ids })
+}
+
+export function restoreSession(sessionId: number) {
+  return http.post<SessionView>(`/sessions/${sessionId}/restore`, {})
+}
+
+export function purgeSession(sessionId: number) {
+  return http.delete<void>(`/sessions/${sessionId}/purge`)
+}
+
+export function searchSessions(keyword: string) {
+  return http.get<SessionView[]>('/sessions/search', { q: keyword })
 }
 
 async function stream(

@@ -3,9 +3,11 @@ import { defineStore } from 'pinia'
 
 export type ThemeMode = 'light' | 'dark'
 export type ThemeAccent = 'green' | 'pink' | 'blue' | 'neutral'
+export type Density = 'cozy' | 'compact'
 
 const MODE_KEY = 'sz_theme_mode'
 const ACCENT_KEY = 'sz_theme_accent'
+const DENSITY_KEY = 'sz_theme_density'
 
 export const ACCENTS: { value: ThemeAccent; label: string; color: string }[] = [
   { value: 'green', label: '淡绿', color: '#52b788' },
@@ -21,11 +23,13 @@ export const ACCENTS: { value: ThemeAccent; label: string; color: string }[] = [
 export const useThemeStore = defineStore('theme', () => {
   const mode = ref<ThemeMode>(readMode())
   const accent = ref<ThemeAccent>(readAccent())
+  const density = ref<Density>(readDensity())
 
   function apply() {
     const root = document.documentElement
     root.dataset.theme = mode.value
     root.dataset.accent = accent.value
+    root.dataset.density = density.value
     // Element Plus 的深色样式挂在 html.dark 上，两个地方都要标
     root.classList.toggle('dark', mode.value === 'dark')
   }
@@ -42,16 +46,26 @@ export const useThemeStore = defineStore('theme', () => {
     apply()
   }
 
+  function setDensity(next: Density) {
+    density.value = next
+    localStorage.setItem(DENSITY_KEY, next)
+    apply()
+  }
+
   function init() {
     apply()
   }
 
-  return { mode, accent, setMode, setAccent, init }
+  return { mode, accent, density, setMode, setAccent, setDensity, init }
 })
 
 function readMode(): ThemeMode {
   const saved = localStorage.getItem(MODE_KEY)
   return saved === 'dark' ? 'dark' : 'light'
+}
+
+function readDensity(): Density {
+  return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'cozy'
 }
 
 function readAccent(): ThemeAccent {

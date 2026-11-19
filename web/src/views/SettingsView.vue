@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// embedded：作为弹窗内容渲染时不带页面头与卡片外框
+defineProps<{ embedded?: boolean }>()
+
+import BrandLogo from '@/components/BrandLogo.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
@@ -81,17 +85,14 @@ async function remove() {
 
 <template>
   <div class="settings-page">
-    <header class="top-bar">
-      <div class="brand">
-        <span class="brand-mark">拾</span>
-        <span class="brand-name">拾知成图</span>
-      </div>
+    <header v-if="!embedded" class="top-bar">
+      <BrandLogo />
       <el-button link @click="router.push('/chat')">返回对话</el-button>
     </header>
 
-    <main class="content">
-      <div class="card">
-        <h1 class="card-title">模型设置</h1>
+    <main class="content" :class="{ embedded }">
+      <div class="card" :class="{ embedded }">
+        <h1 v-if="!embedded" class="card-title">模型设置</h1>
         <p class="card-desc">
           填自己的接口地址和 key，之后的对话就用你的模型。不填则用服务端默认模型。
         </p>
@@ -160,25 +161,8 @@ async function remove() {
   justify-content: space-between;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-weight: 600;
-}
 
-.brand-name {
-  font-size: 16px;
-  letter-spacing: 1px;
-}
 
 .content {
   flex: 1;
@@ -240,5 +224,19 @@ async function remove() {
   margin: 18px 0 0;
   font-size: 12px;
   line-height: 1.8;
+}
+
+/* 放进弹窗时由弹窗提供标题和留白 */
+.content.embedded {
+  padding: 0;
+}
+
+.card.embedded {
+  max-width: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 </style>
