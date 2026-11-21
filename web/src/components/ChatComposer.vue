@@ -5,7 +5,6 @@ import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{
   streaming: boolean
-  disabled?: boolean
 }>()
 
 const emit = defineEmits<{ send: [text: string]; stop: [] }>()
@@ -26,7 +25,7 @@ watch(
 )
 
 function submit() {
-  if (props.streaming || props.disabled) return
+  if (props.streaming) return
   const value = text.value.trim()
   if (!value) return
   emit('send', value)
@@ -50,11 +49,10 @@ function onKeydown(event: KeyboardEvent) {
       :autosize="{ minRows: 1, maxRows: 5 }"
       resize="none"
       placeholder="问点什么，Enter 发送，Shift + Enter 换行"
-      :disabled="disabled"
       @keydown="onKeydown"
     />
     <el-button v-if="streaming" class="action" @click="emit('stop')">停止</el-button>
-    <el-button v-else class="action" type="primary" :disabled="disabled || !text.trim()" @click="submit">
+    <el-button v-else class="action" type="primary" :disabled="!text.trim()" @click="submit">
       发送
     </el-button>
   </div>

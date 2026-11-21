@@ -36,7 +36,7 @@ const md: InstanceType<typeof MarkdownIt> = new MarkdownIt({
 
 md.use(texmath, { engine: katex, delimiters: 'dollars', katexOptions: { throwOnError: false } })
 
-// 表格在窄屏会撑破气泡，外面套一层可横向滚动的容器
+// 窄屏放不下宽表格，外面套一层可横向滚动的容器
 const defaultTableOpen =
   md.renderer.rules.table_open ?? ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options))
 md.renderer.rules.table_open = (tokens, idx, options, env, self) =>

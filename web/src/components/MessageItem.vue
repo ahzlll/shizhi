@@ -28,7 +28,7 @@ const canRetry = computed(
 const canRegenerate = computed(
   () => !isUser.value && props.message.id > 0 && !props.streaming && props.message.streamState === 1,
 )
-// 失败且一个字都没产出时只留状态行，否则会出现一个空白区域
+// 有内容才渲染正文；生成中即使还没出字也保留容器，好让光标有地方待
 const showContent = computed(() => props.streaming || props.message.content.trim().length > 0)
 
 // 只统计这条回答本身的用量，不含重新送进去的历史上下文
@@ -211,7 +211,7 @@ function onMarkdownClick(event: MouseEvent) {
   padding-bottom: 16px;
 }
 
-/* 提问不套气泡：一条竖线与回答区分，两者都在同一列里，不做左右分栏 */
+/* 提问用一条竖线区分，和回答同处一列 */
 .is-user {
   align-self: stretch;
   align-items: flex-start;
@@ -238,7 +238,7 @@ function onMarkdownClick(event: MouseEvent) {
   line-height: var(--sz-msg-line, 1.75);
 }
 
-/* 不套气泡，但给回答一块白色底，和页面背景分开 */
+/* 回答是整块白底，和页面背景分开 */
 .answer.is-filled {
   padding: 14px 18px;
   border-radius: 14px;

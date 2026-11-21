@@ -163,7 +163,7 @@ html[data-theme='dark'] body {
 
 .sidebar {
   border-right: 1px solid var(--sz-line);
-  /* 直接混主题色，而不是用几乎看不出色的极浅底 */
+  /* 混一层主题色，和右侧内容区分开 */
   background-color: color-mix(in srgb, var(--sz-brand) 22%, var(--sz-surface));
 }
 
@@ -184,8 +184,7 @@ html[data-theme='dark'] body {
 
 .item .time,
 .hint,
-.empty,
-.empty-hint {
+.empty {
   color: var(--sz-ink-muted);
 }
 
@@ -296,6 +295,13 @@ html[data-density='compact'] {
   color: var(--sz-brand-deep);
 }
 
+.code-toggle {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  border-top: 1px solid var(--sz-line);
+}
+
 .markdown .code-block pre {
   margin: 0;
   padding: 12px 14px;
@@ -321,13 +327,6 @@ html[data-density='compact'] {
   background: linear-gradient(transparent, var(--sz-code-bg));
 }
 
-.code-toggle {
-  display: block;
-  width: 100%;
-  padding: 6px;
-  border-top: 1px solid var(--sz-line);
-}
-
 /* 表格窄屏可横向滚动 */
 .table-wrap {
   margin: 10px 0;
@@ -349,17 +348,6 @@ html[data-density='compact'] {
 
 .markdown th {
   background-color: var(--sz-brand-soft);
-}
-
-/* 会话操作菜单 */
-.act {
-  background-color: var(--sz-surface);
-  color: var(--sz-ink-muted);
-  box-shadow: 0 1px 4px rgba(31, 45, 40, 0.08);
-}
-
-.act:hover {
-  color: var(--sz-brand-deep);
 }
 
 .menu {

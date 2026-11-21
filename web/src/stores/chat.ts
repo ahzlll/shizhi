@@ -272,7 +272,7 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       controller = null
       // 没有收到 ack 说明这条提问根本没落库：撤掉乐观插入的那条和空的回答占位，
-      // 把原文放回输入框，别让用户对着一条不存在的消息和空白气泡
+      // 把原文放回输入框，别让用户对着一条不存在的消息和一片空白
       if (draft.value && draft.value.id == null) {
         messages.value = messages.value.filter((item) => item.id !== tempUserId)
         draft.value = null

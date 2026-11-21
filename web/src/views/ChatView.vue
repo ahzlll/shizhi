@@ -605,61 +605,6 @@ function onUserCommand(command: string) {
   transition: width 0.2s ease;
 }
 
-/* 输入框上方：当前模型 + 上下文占用，点模型名直接去设置 */
-.model-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 4px 8px;
-  font-size: 12px;
-  color: var(--sz-ink-muted);
-}
-
-.model-chip {
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--sz-brand-deep);
-}
-
-.model-chip:hover {
-  text-decoration: underline;
-}
-
-.model-badge {
-  margin-left: 4px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background-color: var(--sz-brand-soft);
-  font-size: 11px;
-}
-
-.ctx-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.ctx-bar {
-  display: inline-block;
-  width: 56px;
-  height: 4px;
-  border-radius: 999px;
-  background-color: var(--sz-line);
-  overflow: hidden;
-}
-
-.ctx-bar i {
-  display: block;
-  height: 100%;
-  background-color: var(--sz-brand);
-  transition: width 0.2s ease;
-}
-
 .quick {
   width: 100%;
   margin: 0 0 10px;
